@@ -7,15 +7,16 @@ const productController = require("../controllers/productController");
 // Create
 router.post("/create", productController.createProduct);
 
-// Read
-router.get("/", productController.getProducts);
-
-router.get("/:id", productController.getProduct);
-
+// Barcode Route (must come before :id)
 router.get(
     "/barcode/:barcode",
     productController.getProductByBarcode
 );
+
+// Read
+router.get("/", productController.getProducts);
+
+router.get("/:id", productController.getProduct);
 
 // Update
 router.put("/:id", productController.updateProduct);
