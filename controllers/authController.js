@@ -2,7 +2,7 @@
 const db = require("../config/db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const admin = require("../config/firebaseAdmin");
+const firebaseAdmin = require("../config/firebaseAdmin");
 
 // =====================================
 // Register
@@ -221,8 +221,7 @@ exports.googleLogin = async (req, res) => {
         }
 
         // Verify Firebase ID Token
-        const decodedToken = await admin.auth().verifyIdToken(idToken);
-
+const decodedToken = await firebaseAdmin.auth.verifyIdToken(idToken);
         const googleId = decodedToken.uid;
         const full_name = decodedToken.name || "";
         const email = decodedToken.email;
