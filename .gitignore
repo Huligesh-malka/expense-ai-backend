@@ -26,3 +26,8 @@ temp/
 
 # Coverage
 coverage/
+
+
+
+
+config/firebase-service-account.json
