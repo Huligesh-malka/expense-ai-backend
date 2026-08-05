@@ -377,3 +377,164 @@ exports.getAllBusinesses = async (req, res) => {
     }
 
 };
+
+
+
+
+
+// ===============================
+// Get Business Profile
+// ===============================
+
+exports.getBusinessProfile = async (req, res) => {
+
+    try {
+
+        const { owner_id } = req.params;
+
+        const [rows] = await db.query(
+
+            `SELECT *
+             FROM businesses
+             WHERE owner_id=?
+             LIMIT 1`,
+
+            [owner_id]
+
+        );
+
+        if (rows.length === 0) {
+
+            return res.status(404).json({
+
+                success: false,
+                message: "Business not found"
+
+            });
+
+        }
+
+        res.json({
+
+            success: true,
+            business: rows[0]
+
+        });
+
+    }
+
+    catch (err) {
+
+        console.log(err);
+
+        res.status(500).json({
+
+            success: false,
+            message: err.message
+
+        });
+
+    }
+
+};
+
+
+
+
+// ===============================
+// Update Business Profile
+// ===============================
+
+exports.updateBusinessProfile = async (req, res) => {
+
+    try {
+
+        const { id } = req.params;
+
+        const {
+
+            business_name,
+            business_type,
+            owner_name,
+            phone,
+            email,
+            gst_number,
+            upi_id,
+            address,
+            city,
+            state,
+            pincode,
+            logo
+
+        } = req.body;
+
+        await db.query(
+
+            `UPDATE businesses
+             SET
+                business_name=?,
+                business_type=?,
+                owner_name=?,
+                phone=?,
+                email=?,
+                gst_number=?,
+                upi_id=?,
+                address=?,
+                city=?,
+                state=?,
+                pincode=?,
+                logo=?
+             WHERE id=?`,
+
+            [
+
+                business_name,
+                business_type,
+                owner_name,
+                phone,
+                email,
+                gst_number,
+                upi_id,
+                address,
+                city,
+                state,
+                pincode,
+                logo,
+                id
+
+            ]
+
+        );
+
+        const [rows] = await db.query(
+
+            "SELECT * FROM businesses WHERE id=?",
+
+            [id]
+
+        );
+
+        res.json({
+
+            success: true,
+            message: "Business Profile Updated Successfully",
+            business: rows[0]
+
+        });
+
+    }
+
+    catch (err) {
+
+        console.log(err);
+
+        res.status(500).json({
+
+            success: false,
+            message: err.message
+
+        });
+
+    }
+
+};

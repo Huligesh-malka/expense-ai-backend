@@ -19,4 +19,16 @@ router.put("/:id", businessController.updateBusiness);
 // Delete Business
 router.delete("/:id", businessController.deleteBusiness);
 
+
+
+router.get(
+    "/profile/:owner_id",
+    businessController.getBusinessProfile
+);
+
+router.put(
+    "/profile/:id",
+    businessController.updateBusinessProfile
+);
+
 module.exports = router;
