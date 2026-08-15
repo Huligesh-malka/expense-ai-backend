@@ -41,6 +41,12 @@ router.get(
 );
 
 
+router.get(
+  "/:id/payments/:paymentId/receipt",
+  purchaseController.downloadPurchasePaymentReceipt
+);
+
+
 // =====================================
 // ADD PAYMENT
 // =====================================
@@ -48,6 +54,9 @@ router.post(
   "/:id/payments",
   purchaseController.addPurchasePayment
 );
+
+
+
 
 
 // =====================================
