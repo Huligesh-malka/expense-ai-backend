@@ -811,3 +811,275 @@ exports.getSupplierPurchases = async (req, res) => {
     });
   }
 };
+
+
+
+
+// =====================================
+// ADD PURCHASE PAYMENT
+// =====================================
+
+exports.addPurchasePayment = async (req, res) => {
+  const connection = await db.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    const { id } = req.params;
+
+    const {
+      amount,
+      payment_method,
+      reference_no,
+      payment_date,
+      notes
+    } = req.body;
+
+    // -----------------------------
+    // Validate amount
+    // -----------------------------
+
+    const paymentAmount = Number(amount);
+
+    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+      await connection.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message: "Valid payment amount is required"
+      });
+    }
+
+    // -----------------------------
+    // Get purchase
+    // -----------------------------
+
+    const [purchaseRows] = await connection.query(
+      `
+      SELECT
+        id,
+        total_amount,
+        paid_amount,
+        due_amount
+      FROM purchases
+      WHERE id = ?
+      FOR UPDATE
+      `,
+      [id]
+    );
+
+    if (purchaseRows.length === 0) {
+      await connection.rollback();
+
+      return res.status(404).json({
+        success: false,
+        message: "Purchase not found"
+      });
+    }
+
+    const purchase = purchaseRows[0];
+
+    const totalAmount = Number(purchase.total_amount || 0);
+    const alreadyPaid = Number(purchase.paid_amount || 0);
+    const currentDue = Number(purchase.due_amount || 0);
+
+    // -----------------------------
+    // Already fully paid
+    // -----------------------------
+
+    if (currentDue <= 0) {
+      await connection.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message: "This purchase is already fully paid"
+      });
+    }
+
+    // -----------------------------
+    // Prevent overpayment
+    // -----------------------------
+
+    if (paymentAmount > currentDue) {
+      await connection.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message:
+          `Payment cannot be greater than remaining balance ₹${currentDue.toFixed(2)}`
+      });
+    }
+
+    // -----------------------------
+    // Calculate new balance
+    // -----------------------------
+
+    const newPaidAmount =
+      Number((alreadyPaid + paymentAmount).toFixed(2));
+
+    const newDueAmount =
+      Number((totalAmount - newPaidAmount).toFixed(2));
+
+    let paymentStatus = "Partial";
+
+    if (newDueAmount <= 0) {
+      paymentStatus = "Paid";
+    }
+
+    // -----------------------------
+    // Create payment transaction
+    // -----------------------------
+
+    const [paymentResult] = await connection.query(
+      `
+      INSERT INTO purchase_payments
+      (
+        purchase_id,
+        amount,
+        payment_method,
+        reference_no,
+        payment_date,
+        notes
+      )
+      VALUES (?, ?, ?, ?, ?, ?)
+      `,
+      [
+        id,
+        paymentAmount,
+        payment_method || "Cash",
+        reference_no || null,
+        payment_date || new Date(),
+        notes || null
+      ]
+    );
+
+    // -----------------------------
+    // Update purchase summary
+    // -----------------------------
+
+    await connection.query(
+      `
+      UPDATE purchases
+      SET
+        paid_amount = ?,
+        due_amount = ?,
+        payment_status = ?,
+        payment_method = ?
+      WHERE id = ?
+      `,
+      [
+        newPaidAmount,
+        newDueAmount,
+        paymentStatus,
+        payment_method || "Cash",
+        id
+      ]
+    );
+
+    await connection.commit();
+
+    res.json({
+      success: true,
+      message: "Payment added successfully",
+
+      data: {
+        payment_id: paymentResult.insertId,
+        purchase_id: Number(id),
+
+        payment_amount: paymentAmount,
+
+        total_amount: totalAmount,
+        paid_amount: newPaidAmount,
+        due_amount: newDueAmount,
+
+        payment_status: paymentStatus
+      }
+    });
+
+  } catch (err) {
+
+    await connection.rollback();
+
+    console.log(err);
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+
+  } finally {
+    connection.release();
+  }
+};
+
+
+
+// =====================================
+// GET PURCHASE PAYMENT HISTORY
+// =====================================
+
+exports.getPurchasePayments = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Check purchase exists
+    const [purchaseRows] = await db.query(
+      `
+      SELECT
+        id,
+        invoice_no,
+        total_amount,
+        paid_amount,
+        due_amount,
+        payment_status
+      FROM purchases
+      WHERE id = ?
+      `,
+      [id]
+    );
+
+    if (purchaseRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Purchase not found"
+      });
+    }
+
+    const [payments] = await db.query(
+      `
+      SELECT
+        id,
+        purchase_id,
+        amount,
+        payment_method,
+        reference_no,
+        payment_date,
+        notes,
+        created_at
+      FROM purchase_payments
+      WHERE purchase_id = ?
+      ORDER BY payment_date ASC, id ASC
+      `,
+      [id]
+    );
+
+    res.json({
+      success: true,
+
+      purchase: purchaseRows[0],
+
+      total_payments: payments.length,
+
+      data: payments
+    });
+
+  } catch (err) {
+
+    console.log(err);
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+};
