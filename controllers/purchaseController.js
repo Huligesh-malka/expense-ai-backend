@@ -746,3 +746,68 @@ exports.deletePurchase = async (req, res) => {
     }
 
 };
+
+
+
+
+
+// =====================================
+// GET SUPPLIER PURCHASES
+// =====================================
+
+exports.getSupplierPurchases = async (req, res) => {
+  try {
+    const { supplierId } = req.params;
+    const business_id = req.query.business_id;
+
+    if (!supplierId) {
+      return res.status(400).json({
+        success: false,
+        message: "Supplier ID is required"
+      });
+    }
+
+    let query = `
+      SELECT
+        p.id,
+        p.invoice_no,
+        p.subtotal,
+        p.discount,
+        p.tax,
+        p.total_amount,
+        p.payment_method,
+        p.payment_status,
+        p.paid_amount,
+        p.due_amount,
+        p.notes,
+        p.created_at
+      FROM purchases p
+      WHERE p.supplier_id = ?
+    `;
+
+    const params = [supplierId];
+
+    if (business_id) {
+      query += ` AND p.business_id = ?`;
+      params.push(business_id);
+    }
+
+    query += ` ORDER BY p.id DESC`;
+
+    const [rows] = await db.query(query, params);
+
+    res.json({
+      success: true,
+      total: rows.length,
+      data: rows
+    });
+
+  } catch (err) {
+    console.log(err);
+
+    res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
+};
