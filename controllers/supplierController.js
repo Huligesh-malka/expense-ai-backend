@@ -119,9 +119,11 @@ exports.createSupplier = async (req, res) => {
 // =====================================
 // GET ALL SUPPLIERS
 // =====================================
+// =====================================
+// GET ALL SUPPLIERS
+// =====================================
 
 exports.getSuppliers = async (req, res) => {
-
     try {
 
         const business_id = req.query.business_id;
@@ -135,19 +137,30 @@ exports.getSuppliers = async (req, res) => {
 
         const [suppliers] = await db.query(
             `SELECT
-                id,
-                supplier_name,
-                company_name,
-                supplier_phone,
-                supplier_email,
-                gst_number,
-                city,
-                opening_balance,
-                status,
-                created_at
-            FROM suppliers
-            WHERE business_id=?
-            ORDER BY id DESC`,
+                s.id,
+                s.supplier_name,
+                s.company_name,
+                s.supplier_phone,
+                s.supplier_email,
+                s.gst_number,
+                s.city,
+                s.status,
+                s.created_at,
+
+                -- Calculate actual outstanding supplier balance
+                COALESCE(
+                    (
+                        SELECT SUM(p.due_amount)
+                        FROM purchases p
+                        WHERE p.supplier_id = s.id
+                        AND p.business_id = s.business_id
+                    ),
+                    0
+                ) AS balance_due
+
+            FROM suppliers s
+            WHERE s.business_id = ?
+            ORDER BY s.id DESC`,
             [business_id]
         );
 
@@ -167,7 +180,6 @@ exports.getSuppliers = async (req, res) => {
         });
 
     }
-
 };
 
 
