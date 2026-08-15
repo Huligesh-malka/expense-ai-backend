@@ -354,15 +354,35 @@ exports.updateSupplier = async (req, res) => {
 // =====================================
 // DELETE SUPPLIER
 // =====================================
+// =====================================
+// UPDATE SUPPLIER STATUS
+// ACTIVE / INACTIVE
+// =====================================
 
-exports.deleteSupplier = async (req, res) => {
+exports.updateSupplierStatus = async (req, res) => {
 
     try {
 
         const { id } = req.params;
+        const { status } = req.body;
 
+        // Validate status
+        if (!["active", "inactive"].includes(status)) {
+
+            return res.status(400).json({
+                success: false,
+                message: "Status must be active or inactive"
+            });
+
+        }
+
+        // Check supplier
         const [supplier] = await db.query(
-            "SELECT * FROM suppliers WHERE id=?",
+            `
+            SELECT id, supplier_name, status
+            FROM suppliers
+            WHERE id=?
+            `,
             [id]
         );
 
@@ -375,14 +395,28 @@ exports.deleteSupplier = async (req, res) => {
 
         }
 
+        // Update only status
         await db.query(
-            "DELETE FROM suppliers WHERE id=?",
-            [id]
+            `
+            UPDATE suppliers
+            SET status=?
+            WHERE id=?
+            `,
+            [status, id]
         );
 
         res.json({
             success: true,
-            message: "Supplier deleted successfully"
+            message:
+                status === "active"
+                    ? "Supplier activated successfully"
+                    : "Supplier made inactive successfully",
+
+            data: {
+                id: supplier[0].id,
+                supplier_name: supplier[0].supplier_name,
+                status: status
+            }
         });
 
     } catch (err) {

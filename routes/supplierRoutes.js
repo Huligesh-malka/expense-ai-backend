@@ -20,6 +20,9 @@ router.get("/:id", supplierController.getSupplier);
 router.put("/:id", supplierController.updateSupplier);
 
 // Delete Supplier
-router.delete("/:id", supplierController.deleteSupplier);
+router.put(
+    "/:id/status",
+    supplierController.updateSupplierStatus
+);
 
 module.exports = router;
