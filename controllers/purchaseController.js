@@ -3,6 +3,9 @@ const db = require("../config/db");
 // =====================================
 // CREATE PURCHASE
 // =====================================
+// =====================================
+// CREATE PURCHASE
+// =====================================
 
 exports.createPurchase = async (req, res) => {
 
@@ -24,7 +27,11 @@ exports.createPurchase = async (req, res) => {
             notes
         } = req.body;
 
-        // Validation
+
+        // =====================================
+        // VALIDATION
+        // =====================================
+
         if (!business_id) {
             return res.status(400).json({
                 success: false,
@@ -46,14 +53,22 @@ exports.createPurchase = async (req, res) => {
             });
         }
 
-        // Invoice Number
+
+        // =====================================
+        // INVOICE NUMBER
+        // =====================================
+
         const invoiceNo =
             "PUR-" +
             Date.now().toString().slice(-8);
 
+
+        // =====================================
+        // CALCULATE SUBTOTAL
+        // =====================================
+
         let subtotal = 0;
 
-        // Calculate subtotal
         for (const item of products) {
 
             subtotal +=
@@ -62,19 +77,43 @@ exports.createPurchase = async (req, res) => {
 
         }
 
-        const finalDiscount = Number(discount || 0);
-        const finalTax = Number(tax || 0);
+
+        // =====================================
+        // DISCOUNT & TAX
+        // =====================================
+
+        const finalDiscount =
+            Number(discount || 0);
+
+        const finalTax =
+            Number(tax || 0);
+
+
+        // =====================================
+        // TOTAL
+        // =====================================
 
         const totalAmount =
             subtotal -
             finalDiscount +
             finalTax;
 
-        const paid = Number(paid_amount || 0);
 
-        const due = totalAmount - paid;
+        // =====================================
+        // PAYMENT
+        // =====================================
 
-        // Insert Purchase
+        const paid =
+            Number(paid_amount || 0);
+
+        const due =
+            totalAmount - paid;
+
+
+        // =====================================
+        // INSERT PURCHASE
+        // =====================================
+
         const [purchaseResult] =
             await connection.query(
 
@@ -95,6 +134,7 @@ exports.createPurchase = async (req, res) => {
                 )
                 VALUES
                 (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+
                 [
                     business_id,
                     supplier_id,
@@ -104,23 +144,70 @@ exports.createPurchase = async (req, res) => {
                     finalTax,
                     totalAmount,
                     payment_method || "Cash",
-                    payment_status || "Paid",
+
+                    // Automatically determine status
+                    paid >= totalAmount
+                        ? "Paid"
+                        : paid > 0
+                            ? "Partial"
+                            : "Unpaid",
+
                     paid,
                     due,
                     notes || null
                 ]
-
             );
+
 
         const purchaseId =
             purchaseResult.insertId;
 
-        // Save Purchase Items
+
+        // =====================================
+        // CREATE INITIAL PAYMENT TRANSACTION
+        // IMPORTANT
+        // =====================================
+
+        if (paid > 0) {
+
+            await connection.query(
+
+                `INSERT INTO purchase_payments
+                (
+                    purchase_id,
+                    amount,
+                    payment_method,
+                    reference_no,
+                    payment_date,
+                    notes
+                )
+                VALUES
+                (?, ?, ?, ?, ?, ?)`,
+
+                [
+                    purchaseId,
+                    paid,
+                    payment_method || "Cash",
+                    null,
+                    new Date(),
+                    "Initial payment at purchase creation"
+                ]
+
+            );
+
+        }
+
+
+        // =====================================
+        // SAVE PURCHASE ITEMS
+        // =====================================
+
         for (const item of products) {
 
             const total =
                 Number(item.purchase_price) *
                 Number(item.quantity);
+
 
             await connection.query(
 
@@ -135,6 +222,7 @@ exports.createPurchase = async (req, res) => {
                 )
                 VALUES
                 (?, ?, ?, ?, ?, ?)`,
+
                 [
                     purchaseId,
                     item.product_id,
@@ -146,12 +234,16 @@ exports.createPurchase = async (req, res) => {
 
             );
 
-            // Update Product Stock
+
+            // =====================================
+            // UPDATE PRODUCT STOCK
+            // =====================================
+
             await connection.query(
 
                 `UPDATE products
                  SET stock = stock + ?
-                 WHERE id=?`,
+                 WHERE id = ?`,
 
                 [
                     item.quantity,
@@ -162,13 +254,24 @@ exports.createPurchase = async (req, res) => {
 
         }
 
+
+        // =====================================
+        // COMMIT
+        // =====================================
+
         await connection.commit();
+
+
+        // =====================================
+        // RESPONSE
+        // =====================================
 
         res.status(201).json({
 
             success: true,
 
-            message: "Purchase created successfully",
+            message:
+                "Purchase created successfully",
 
             purchaseId,
 
@@ -176,17 +279,25 @@ exports.createPurchase = async (req, res) => {
 
         });
 
+
     } catch (err) {
 
         await connection.rollback();
 
-        console.log(err);
+        console.error(
+            "Create Purchase Error:",
+            err
+        );
 
         res.status(500).json({
 
             success: false,
 
-            message: err.message
+            message:
+                "Failed to create purchase",
+
+            error:
+                err.message
 
         });
 
@@ -201,9 +312,6 @@ exports.createPurchase = async (req, res) => {
 
 
 
-// =====================================
-// GET ALL PURCHASES
-// =====================================
 
 exports.getPurchases = async (req, res) => {
 
