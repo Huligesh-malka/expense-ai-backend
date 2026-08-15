@@ -140,6 +140,22 @@ exports.createProduct = async (req, res) => {
             }
         }
 
+        // Check for duplicate barcode if provided
+        if (barcode) {
+            const [existingBarcode] = await db.query(
+                `SELECT id FROM products
+                 WHERE business_id=? AND barcode=?`,
+                [business_id, barcode]
+            );
+
+            if (existingBarcode.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Barcode already exists for another product in this business."
+                });
+            }
+        }
+
         // Insert product
         const [result] = await db.query(
             `INSERT INTO products (
@@ -409,6 +425,29 @@ exports.updateProduct = async (req, res) => {
                 return res.status(400).json({
                     success: false,
                     message: "Product code already exists."
+                });
+            }
+        }
+
+        // Duplicate Barcode
+        if (barcode) {
+            const [barcodeExist] = await db.query(
+                `SELECT id
+                 FROM products
+                 WHERE business_id=?
+                 AND barcode=?
+                 AND id<>?`,
+                [
+                    product[0].business_id,
+                    barcode,
+                    id
+                ]
+            );
+
+            if (barcodeExist.length > 0) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Barcode already exists for another product."
                 });
             }
         }
