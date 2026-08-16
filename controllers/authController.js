@@ -140,22 +140,13 @@ exports.login = async (req, res) => {
             ? businesses[0]
             : null;
 
+        // REMOVED: expiresIn: "7d" - Token will never expire
         const token = jwt.sign(
-
             {
-
                 id: user.id
-
             },
-
-            process.env.JWT_SECRET,
-
-            {
-
-                expiresIn: "7d"
-
-            }
-
+            process.env.JWT_SECRET
+            // No expiresIn parameter
         );
 
         res.json({
@@ -221,7 +212,7 @@ exports.googleLogin = async (req, res) => {
         }
 
         // Verify Firebase ID Token
-const decodedToken = await firebaseAdmin.auth.verifyIdToken(idToken);
+        const decodedToken = await firebaseAdmin.auth.verifyIdToken(idToken);
         const googleId = decodedToken.uid;
         const full_name = decodedToken.name || "";
         const email = decodedToken.email;
@@ -320,22 +311,13 @@ const decodedToken = await firebaseAdmin.auth.verifyIdToken(idToken);
             ? businesses[0]
             : null;
 
+        // REMOVED: expiresIn: "7d" - Token will never expire
         const token = jwt.sign(
-
             {
-
                 id: user.id
-
             },
-
-            process.env.JWT_SECRET,
-
-            {
-
-                expiresIn: "7d"
-
-            }
-
+            process.env.JWT_SECRET
+            // No expiresIn parameter
         );
 
         res.json({
