@@ -79,12 +79,13 @@ exports.getDashboard = async (req, res) => {
             
             // Today's Sales
             db.query(
-                `SELECT IFNULL(SUM(total_amount), 0) AS total 
-                 FROM sales 
-                 WHERE business_id=? 
-                 AND DATE(created_at) = CURDATE()`,
-                [businessId]
-            ),
+    `SELECT IFNULL(SUM(total_amount), 0) AS total
+     FROM sales
+     WHERE business_id=?
+     AND created_at >= CURDATE()
+     AND created_at < CURDATE() + INTERVAL 1 DAY`,
+    [businessId]
+),
             
             // Month's Sales
             db.query(
