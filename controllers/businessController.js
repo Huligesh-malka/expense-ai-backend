@@ -282,7 +282,7 @@ exports.getMyBusinessProfile = async (req, res) => {
         const [business] = await db.query(
             `SELECT 
                 b.*,
-                u.name as owner_name,
+                u.full_name as owner_name,
                 u.email as owner_email
             FROM businesses b
             INNER JOIN users u ON u.id = b.owner_id
@@ -509,7 +509,7 @@ exports.getAllBusinesses = async (req, res) => {
                 b.state,
                 b.status,
                 b.created_at,
-                u.name as owner_name,
+                u.full_name as owner_name,
                 u.email as owner_email
             FROM businesses b
             INNER JOIN users u ON u.id = b.owner_id
