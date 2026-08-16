@@ -87,7 +87,7 @@
 
     app.use("/api/ai", aiRoutes);
 
-    app.use("/api/expenses", expenseRoutes);
+    
 
     app.use("/api/dashboard", dashboardRoutes);
     app.use("/api/business", businessRoutes);
