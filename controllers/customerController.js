@@ -7,21 +7,16 @@ const db = require("../config/db");
 exports.createCustomer = async (req, res) => {
     try {
         const {
-            business_id,
             customer_name,
             customer_phone,
             customer_email,
             address
         } = req.body;
 
-        // Validation
-        if (!business_id) {
-            return res.status(400).json({
-                success: false,
-                message: "Business ID is required"
-            });
-        }
+        // Get business_id from middleware instead of request body
+        const businessId = req.businessId;
 
+        // Validation
         if (!customer_name) {
             return res.status(400).json({
                 success: false,
@@ -42,7 +37,7 @@ exports.createCustomer = async (req, res) => {
              FROM customers
              WHERE business_id = ?
              AND customer_phone = ?`,
-            [business_id, customer_phone]
+            [businessId, customer_phone]
         );
 
         if (existing.length > 0) {
@@ -65,7 +60,7 @@ exports.createCustomer = async (req, res) => {
             VALUES
             (?, ?, ?, ?, ?)`,
             [
-                business_id,
+                businessId,
                 customer_name,
                 customer_phone,
                 customer_email || null,
@@ -80,16 +75,14 @@ exports.createCustomer = async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
+        console.error("Create Customer Error:", err);
 
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Failed to create customer"
         });
     }
 };
-
-
 
 // =====================================
 // GET ALL CUSTOMERS
@@ -97,14 +90,7 @@ exports.createCustomer = async (req, res) => {
 
 exports.getCustomers = async (req, res) => {
     try {
-        const business_id = req.query.business_id;
-
-        if (!business_id) {
-            return res.status(400).json({
-                success: false,
-                message: "Business ID is required"
-            });
-        }
+        const businessId = req.businessId;
 
         const [customers] = await db.query(
             `SELECT
@@ -121,7 +107,7 @@ exports.getCustomers = async (req, res) => {
             FROM customers
             WHERE business_id = ?
             ORDER BY id DESC`,
-            [business_id]
+            [businessId]
         );
 
         res.json({
@@ -131,18 +117,14 @@ exports.getCustomers = async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
+        console.error("Get Customers Error:", err);
 
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Failed to fetch customers"
         });
     }
 };
-
-
-
-
 
 // =====================================
 // GET SINGLE CUSTOMER
@@ -151,6 +133,7 @@ exports.getCustomers = async (req, res) => {
 exports.getCustomer = async (req, res) => {
     try {
         const { id } = req.params;
+        const businessId = req.businessId;
 
         const [customer] = await db.query(
             `SELECT
@@ -167,8 +150,9 @@ exports.getCustomer = async (req, res) => {
                 created_at,
                 updated_at
              FROM customers
-             WHERE id = ?`,
-            [id]
+             WHERE id = ?
+             AND business_id = ?`,
+            [id, businessId]
         );
 
         if (customer.length === 0) {
@@ -184,15 +168,14 @@ exports.getCustomer = async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
+        console.error("Get Customer Error:", err);
 
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Failed to fetch customer"
         });
     }
 };
-
 
 // =====================================
 // UPDATE CUSTOMER
@@ -201,6 +184,7 @@ exports.getCustomer = async (req, res) => {
 exports.updateCustomer = async (req, res) => {
     try {
         const { id } = req.params;
+        const businessId = req.businessId;
 
         const {
             customer_name,
@@ -210,10 +194,12 @@ exports.updateCustomer = async (req, res) => {
             status
         } = req.body;
 
-        // Check customer exists
+        // Check customer exists AND belongs to this business
         const [customer] = await db.query(
-            "SELECT * FROM customers WHERE id=?",
-            [id]
+            `SELECT * FROM customers 
+             WHERE id = ? 
+             AND business_id = ?`,
+            [id, businessId]
         );
 
         if (customer.length === 0) {
@@ -223,18 +209,18 @@ exports.updateCustomer = async (req, res) => {
             });
         }
 
-        // Check duplicate phone number
+        // Check duplicate phone number (only if phone is being updated)
         if (customer_phone) {
             const [exists] = await db.query(
                 `SELECT id
                  FROM customers
-                 WHERE customer_phone=?
-                 AND id<>?
-                 AND business_id=?`,
+                 WHERE customer_phone = ?
+                 AND id <> ?
+                 AND business_id = ?`,
                 [
                     customer_phone,
                     id,
-                    customer[0].business_id
+                    businessId
                 ]
             );
 
@@ -249,19 +235,21 @@ exports.updateCustomer = async (req, res) => {
         await db.query(
             `UPDATE customers
              SET
-                customer_name=?,
-                customer_phone=?,
-                customer_email=?,
-                address=?,
-                status=?
-             WHERE id=?`,
+                customer_name = ?,
+                customer_phone = ?,
+                customer_email = ?,
+                address = ?,
+                status = ?
+             WHERE id = ?
+             AND business_id = ?`,
             [
                 customer_name || customer[0].customer_name,
                 customer_phone || customer[0].customer_phone,
                 customer_email || customer[0].customer_email,
                 address || customer[0].address,
                 status || customer[0].status,
-                id
+                id,
+                businessId
             ]
         );
 
@@ -271,19 +259,14 @@ exports.updateCustomer = async (req, res) => {
         });
 
     } catch (err) {
-        console.error(err);
+        console.error("Update Customer Error:", err);
 
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Failed to update customer"
         });
     }
 };
-
-
-
-
-
 
 // =====================================
 // GET CUSTOMER PURCHASE HISTORY
@@ -291,10 +274,10 @@ exports.updateCustomer = async (req, res) => {
 
 exports.getCustomerHistory = async (req, res) => {
     try {
-
         const { id } = req.params;
+        const businessId = req.businessId;
 
-        // Customer Details
+        // Customer Details - ensure customer belongs to this business
         const [customer] = await db.query(
             `SELECT
                 id,
@@ -309,8 +292,9 @@ exports.getCustomerHistory = async (req, res) => {
                 status,
                 created_at
             FROM customers
-            WHERE id=?`,
-            [id]
+            WHERE id = ?
+            AND business_id = ?`,
+            [id, businessId]
         );
 
         if (customer.length === 0) {
@@ -333,7 +317,7 @@ exports.getCustomerHistory = async (req, res) => {
                 payment_status,
                 created_at
             FROM sales
-            WHERE customer_id=?
+            WHERE customer_id = ?
             ORDER BY created_at DESC`,
             [id]
         );
@@ -345,13 +329,11 @@ exports.getCustomerHistory = async (req, res) => {
         });
 
     } catch (err) {
-
-        console.log(err);
+        console.error("Get Customer History Error:", err);
 
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Failed to fetch customer history"
         });
-
     }
 };
