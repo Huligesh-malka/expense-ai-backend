@@ -316,10 +316,13 @@ exports.getCustomerHistory = async (req, res) => {
                 payment_method,
                 payment_status,
                 created_at
+            
             FROM sales
-            WHERE customer_id = ?
+WHERE customer_id = ?
+AND business_id = ?
+
             ORDER BY created_at DESC`,
-            [id]
+            [id, businessId]
         );
 
         res.json({
