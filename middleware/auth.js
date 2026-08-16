@@ -1,20 +1,31 @@
-// Expense AI Backend
+// middleware/authMiddleware.js
+
 const jwt = require("jsonwebtoken");
 
 module.exports = (req, res, next) => {
-
-    const token = req.header("Authorization");
-
-    if (!token) {
-        return res.status(401).json({
-            success: false,
-            message: "Access Denied"
-        });
-    }
-
     try {
+        const authHeader = req.header("Authorization");
 
-        const verified = jwt.verify(token, process.env.JWT_SECRET);
+        if (!authHeader) {
+            return res.status(401).json({
+                success: false,
+                message: "Authentication required"
+            });
+        }
+
+        if (!authHeader.startsWith("Bearer ")) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid authorization format"
+            });
+        }
+
+        const token = authHeader.substring(7);
+
+        const verified = jwt.verify(
+            token,
+            process.env.JWT_SECRET
+        );
 
         req.user = verified;
 
@@ -22,11 +33,9 @@ module.exports = (req, res, next) => {
 
     } catch (err) {
 
-        res.status(401).json({
+        return res.status(401).json({
             success: false,
-            message: "Invalid Token"
+            message: "Invalid or expired token"
         });
-
     }
-
 };
