@@ -3,10 +3,6 @@ const db = require("../config/db");
 // =====================================
 // CREATE PURCHASE
 // =====================================
-// =====================================
-// CREATE PURCHASE
-// =====================================
-
 exports.createPurchase = async (req, res) => {
 
     const connection = await db.getConnection();
@@ -15,8 +11,9 @@ exports.createPurchase = async (req, res) => {
 
         await connection.beginTransaction();
 
+        const businessId = req.businessId;
+
         const {
-            business_id,
             supplier_id,
             products,
             discount,
@@ -27,12 +24,11 @@ exports.createPurchase = async (req, res) => {
             notes
         } = req.body;
 
-
         // =====================================
         // VALIDATION
         // =====================================
 
-        if (!business_id) {
+        if (!businessId) {
             return res.status(400).json({
                 success: false,
                 message: "Business ID is required"
@@ -53,7 +49,6 @@ exports.createPurchase = async (req, res) => {
             });
         }
 
-
         // =====================================
         // INVOICE NUMBER
         // =====================================
@@ -61,7 +56,6 @@ exports.createPurchase = async (req, res) => {
         const invoiceNo =
             "PUR-" +
             Date.now().toString().slice(-8);
-
 
         // =====================================
         // CALCULATE SUBTOTAL
@@ -77,7 +71,6 @@ exports.createPurchase = async (req, res) => {
 
         }
 
-
         // =====================================
         // DISCOUNT & TAX
         // =====================================
@@ -88,7 +81,6 @@ exports.createPurchase = async (req, res) => {
         const finalTax =
             Number(tax || 0);
 
-
         // =====================================
         // TOTAL
         // =====================================
@@ -97,7 +89,6 @@ exports.createPurchase = async (req, res) => {
             subtotal -
             finalDiscount +
             finalTax;
-
 
         // =====================================
         // PAYMENT
@@ -108,7 +99,6 @@ exports.createPurchase = async (req, res) => {
 
         const due =
             totalAmount - paid;
-
 
         // =====================================
         // INSERT PURCHASE
@@ -136,7 +126,7 @@ exports.createPurchase = async (req, res) => {
                 (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 
                 [
-                    business_id,
+                    businessId,
                     supplier_id,
                     invoiceNo,
                     subtotal,
@@ -158,10 +148,8 @@ exports.createPurchase = async (req, res) => {
                 ]
             );
 
-
         const purchaseId =
             purchaseResult.insertId;
-
 
         // =====================================
         // CREATE INITIAL PAYMENT TRANSACTION
@@ -197,7 +185,6 @@ exports.createPurchase = async (req, res) => {
 
         }
 
-
         // =====================================
         // SAVE PURCHASE ITEMS
         // =====================================
@@ -207,7 +194,6 @@ exports.createPurchase = async (req, res) => {
             const total =
                 Number(item.purchase_price) *
                 Number(item.quantity);
-
 
             await connection.query(
 
@@ -234,7 +220,6 @@ exports.createPurchase = async (req, res) => {
 
             );
 
-
             // =====================================
             // UPDATE PRODUCT STOCK
             // =====================================
@@ -243,24 +228,23 @@ exports.createPurchase = async (req, res) => {
 
                 `UPDATE products
                  SET stock = stock + ?
-                 WHERE id = ?`,
+                 WHERE id = ? AND business_id = ?`,
 
                 [
                     item.quantity,
-                    item.product_id
+                    item.product_id,
+                    businessId
                 ]
 
             );
 
         }
 
-
         // =====================================
         // COMMIT
         // =====================================
 
         await connection.commit();
-
 
         // =====================================
         // RESPONSE
@@ -278,7 +262,6 @@ exports.createPurchase = async (req, res) => {
             invoiceNo
 
         });
-
 
     } catch (err) {
 
@@ -309,17 +292,16 @@ exports.createPurchase = async (req, res) => {
 
 };
 
-
-
-
-
+// =====================================
+// GET ALL PURCHASES
+// =====================================
 exports.getPurchases = async (req, res) => {
 
     try {
 
-        const business_id = req.query.business_id;
+        const businessId = req.businessId;
 
-        if (!business_id) {
+        if (!businessId) {
 
             return res.status(400).json({
                 success: false,
@@ -347,13 +329,13 @@ exports.getPurchases = async (req, res) => {
             FROM purchases p
 
             LEFT JOIN suppliers s
-            ON p.supplier_id=s.id
+            ON p.supplier_id=s.id AND s.business_id = ?
 
             WHERE p.business_id=?
 
             ORDER BY p.id DESC`,
 
-            [business_id]
+            [businessId, businessId]
 
         );
 
@@ -383,18 +365,15 @@ exports.getPurchases = async (req, res) => {
 
 };
 
-
-
-
 // =====================================
 // GET SINGLE PURCHASE
 // =====================================
-
 exports.getPurchase = async (req, res) => {
 
     try {
 
         const { id } = req.params;
+        const businessId = req.businessId;
 
         const [purchase] = await db.query(
 
@@ -409,11 +388,11 @@ exports.getPurchase = async (req, res) => {
 
             LEFT JOIN suppliers s
 
-            ON p.supplier_id=s.id
+            ON p.supplier_id=s.id AND s.business_id = ?
 
-            WHERE p.id=?`,
+            WHERE p.id=? AND p.business_id = ?`,
 
-            [id]
+            [businessId, id, businessId]
 
         );
 
@@ -453,17 +432,15 @@ exports.getPurchase = async (req, res) => {
 
 };
 
-
-
 // =====================================
 // GET PURCHASE DETAILS
 // =====================================
-
 exports.getPurchaseDetails = async (req, res) => {
 
     try {
 
         const { id } = req.params;
+        const businessId = req.businessId;
 
         const [purchase] = await db.query(
 
@@ -478,11 +455,11 @@ exports.getPurchaseDetails = async (req, res) => {
 
             LEFT JOIN suppliers s
 
-            ON p.supplier_id=s.id
+            ON p.supplier_id=s.id AND s.business_id = ?
 
-            WHERE p.id=?`,
+            WHERE p.id=? AND p.business_id = ?`,
 
-            [id]
+            [businessId, id, businessId]
 
         );
 
@@ -522,11 +499,11 @@ exports.getPurchaseDetails = async (req, res) => {
 
             LEFT JOIN products pr
 
-            ON pi.product_id=pr.id
+            ON pi.product_id=pr.id AND pr.business_id = ?
 
             WHERE pi.purchase_id=?`,
 
-            [id]
+            [businessId, id]
 
         );
 
@@ -556,16 +533,21 @@ exports.getPurchaseDetails = async (req, res) => {
 
 };
 
-
 // =====================================
 // PURCHASE DASHBOARD
 // =====================================
-
 exports.purchaseDashboard = async (req, res) => {
 
     try {
 
-        const business_id = req.query.business_id;
+        const businessId = req.businessId;
+
+        if (!businessId) {
+            return res.status(400).json({
+                success: false,
+                message: "Business ID is required"
+            });
+        }
 
         const [[totalPurchases]] = await db.query(
 
@@ -573,7 +555,7 @@ exports.purchaseDashboard = async (req, res) => {
              FROM purchases
              WHERE business_id=?`,
 
-            [business_id]
+            [businessId]
 
         );
 
@@ -583,7 +565,7 @@ exports.purchaseDashboard = async (req, res) => {
              FROM purchases
              WHERE business_id=?`,
 
-            [business_id]
+            [businessId]
 
         );
 
@@ -593,7 +575,7 @@ exports.purchaseDashboard = async (req, res) => {
              FROM purchases
              WHERE business_id=?`,
 
-            [business_id]
+            [businessId]
 
         );
 
@@ -603,7 +585,7 @@ exports.purchaseDashboard = async (req, res) => {
              FROM purchases
              WHERE business_id=?`,
 
-            [business_id]
+            [businessId]
 
         );
 
@@ -641,12 +623,9 @@ exports.purchaseDashboard = async (req, res) => {
 
 };
 
-
-
 // =====================================
 // UPDATE PURCHASE
 // =====================================
-
 exports.updatePurchase = async (req, res) => {
 
     const connection = await db.getConnection();
@@ -656,6 +635,7 @@ exports.updatePurchase = async (req, res) => {
         await connection.beginTransaction();
 
         const { id } = req.params;
+        const businessId = req.businessId;
 
         const {
             payment_method,
@@ -665,8 +645,8 @@ exports.updatePurchase = async (req, res) => {
         } = req.body;
 
         const [purchase] = await connection.query(
-            "SELECT * FROM purchases WHERE id=?",
-            [id]
+            "SELECT * FROM purchases WHERE id=? AND business_id = ?",
+            [id, businessId]
         );
 
         if (purchase.length === 0) {
@@ -695,7 +675,7 @@ exports.updatePurchase = async (req, res) => {
                 paid_amount=?,
                 due_amount=?,
                 notes=?
-             WHERE id=?`,
+             WHERE id=? AND business_id = ?`,
 
             [
                 payment_method || purchase[0].payment_method,
@@ -703,7 +683,8 @@ exports.updatePurchase = async (req, res) => {
                 paid,
                 due,
                 notes || purchase[0].notes,
-                id
+                id,
+                businessId
             ]
 
         );
@@ -740,12 +721,9 @@ exports.updatePurchase = async (req, res) => {
 
 };
 
-
-
 // =====================================
 // DELETE PURCHASE
 // =====================================
-
 exports.deletePurchase = async (req, res) => {
 
     const connection = await db.getConnection();
@@ -755,12 +733,13 @@ exports.deletePurchase = async (req, res) => {
         await connection.beginTransaction();
 
         const { id } = req.params;
+        const businessId = req.businessId;
 
         const [purchase] = await connection.query(
 
-            "SELECT * FROM purchases WHERE id=?",
+            "SELECT * FROM purchases WHERE id=? AND business_id = ?",
 
-            [id]
+            [id, businessId]
 
         );
 
@@ -794,11 +773,12 @@ exports.deletePurchase = async (req, res) => {
 
                 `UPDATE products
                  SET stock = stock - ?
-                 WHERE id=?`,
+                 WHERE id=? AND business_id = ?`,
 
                 [
                     item.quantity,
-                    item.product_id
+                    item.product_id,
+                    businessId
                 ]
 
             );
@@ -817,9 +797,9 @@ exports.deletePurchase = async (req, res) => {
         // Delete Purchase
         await connection.query(
 
-            "DELETE FROM purchases WHERE id=?",
+            "DELETE FROM purchases WHERE id=? AND business_id = ?",
 
-            [id]
+            [id, businessId]
 
         );
 
@@ -855,18 +835,13 @@ exports.deletePurchase = async (req, res) => {
 
 };
 
-
-
-
-
 // =====================================
 // GET SUPPLIER PURCHASES
 // =====================================
-
 exports.getSupplierPurchases = async (req, res) => {
   try {
     const { supplierId } = req.params;
-    const business_id = req.query.business_id;
+    const businessId = req.businessId;
 
     if (!supplierId) {
       return res.status(400).json({
@@ -875,7 +850,21 @@ exports.getSupplierPurchases = async (req, res) => {
       });
     }
 
-    let query = `
+    // Verify supplier belongs to this business
+    const [supplier] = await db.query(
+      "SELECT id FROM suppliers WHERE id = ? AND business_id = ?",
+      [supplierId, businessId]
+    );
+
+    if (supplier.length === 0) {
+      return res.status(403).json({
+        success: false,
+        message: "Supplier not found or does not belong to your business"
+      });
+    }
+
+    const [rows] = await db.query(
+      `
       SELECT
         p.id,
         p.invoice_no,
@@ -890,19 +879,11 @@ exports.getSupplierPurchases = async (req, res) => {
         p.notes,
         p.created_at
       FROM purchases p
-      WHERE p.supplier_id = ?
-    `;
-
-    const params = [supplierId];
-
-    if (business_id) {
-      query += ` AND p.business_id = ?`;
-      params.push(business_id);
-    }
-
-    query += ` ORDER BY p.id DESC`;
-
-    const [rows] = await db.query(query, params);
+      WHERE p.supplier_id = ? AND p.business_id = ?
+      ORDER BY p.id DESC
+      `,
+      [supplierId, businessId]
+    );
 
     res.json({
       success: true,
@@ -920,13 +901,9 @@ exports.getSupplierPurchases = async (req, res) => {
   }
 };
 
-
-
-
 // =====================================
 // ADD PURCHASE PAYMENT
 // =====================================
-
 exports.addPurchasePayment = async (req, res) => {
   const connection = await db.getConnection();
 
@@ -934,6 +911,7 @@ exports.addPurchasePayment = async (req, res) => {
     await connection.beginTransaction();
 
     const { id } = req.params;
+    const businessId = req.businessId;
 
     const {
       amount,
@@ -970,10 +948,10 @@ exports.addPurchasePayment = async (req, res) => {
         paid_amount,
         due_amount
       FROM purchases
-      WHERE id = ?
+      WHERE id = ? AND business_id = ?
       FOR UPDATE
       `,
-      [id]
+      [id, businessId]
     );
 
     if (purchaseRows.length === 0) {
@@ -1073,14 +1051,15 @@ exports.addPurchasePayment = async (req, res) => {
         due_amount = ?,
         payment_status = ?,
         payment_method = ?
-      WHERE id = ?
+      WHERE id = ? AND business_id = ?
       `,
       [
         newPaidAmount,
         newDueAmount,
         paymentStatus,
         payment_method || "Cash",
-        id
+        id,
+        businessId
       ]
     );
 
@@ -1120,17 +1099,15 @@ exports.addPurchasePayment = async (req, res) => {
   }
 };
 
-
-
 // =====================================
 // GET PURCHASE PAYMENT HISTORY
 // =====================================
-
 exports.getPurchasePayments = async (req, res) => {
   try {
     const { id } = req.params;
+    const businessId = req.businessId;
 
-    // Check purchase exists
+    // Check purchase exists and belongs to business
     const [purchaseRows] = await db.query(
       `
       SELECT
@@ -1141,9 +1118,9 @@ exports.getPurchasePayments = async (req, res) => {
         due_amount,
         payment_status
       FROM purchases
-      WHERE id = ?
+      WHERE id = ? AND business_id = ?
       `,
-      [id]
+      [id, businessId]
     );
 
     if (purchaseRows.length === 0) {
@@ -1191,6 +1168,3 @@ exports.getPurchasePayments = async (req, res) => {
     });
   }
 };
-
-
-

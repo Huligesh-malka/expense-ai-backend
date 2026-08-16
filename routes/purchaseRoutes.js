@@ -3,87 +3,109 @@ const router = express.Router();
 
 const purchaseController = require("../controllers/purchaseController");
 
+const authMiddleware = require("../middleware/auth");
+const businessMiddleware = require("../middleware/businessMiddleware");
 
 // =====================================
 // CREATE PURCHASE
 // =====================================
-router.post("/", purchaseController.createPurchase);
-
+router.post(
+    "/",
+    authMiddleware,
+    businessMiddleware,
+    purchaseController.createPurchase
+);
 
 // =====================================
 // GET ALL PURCHASES
 // =====================================
-router.get("/", purchaseController.getPurchases);
-
+router.get(
+    "/",
+    authMiddleware,
+    businessMiddleware,
+    purchaseController.getPurchases
+);
 
 // =====================================
 // PURCHASE DASHBOARD
 // =====================================
-router.get("/dashboard", purchaseController.purchaseDashboard);
-
+router.get(
+    "/dashboard",
+    authMiddleware,
+    businessMiddleware,
+    purchaseController.purchaseDashboard
+);
 
 // =====================================
 // SUPPLIER PURCHASES
 // IMPORTANT: BEFORE /:id
 // =====================================
 router.get(
-  "/suppliers/:supplierId/purchases",
-  purchaseController.getSupplierPurchases
+    "/suppliers/:supplierId/purchases",
+    authMiddleware,
+    businessMiddleware,
+    purchaseController.getSupplierPurchases
 );
-
 
 // =====================================
 // PAYMENT HISTORY
+// IMPORTANT: BEFORE /:id
 // =====================================
 router.get(
-  "/:id/payments",
-  purchaseController.getPurchasePayments
+    "/:id/payments",
+    authMiddleware,
+    businessMiddleware,
+    purchaseController.getPurchasePayments
 );
-
 
 // =====================================
 // ADD PAYMENT
 // =====================================
 router.post(
-  "/:id/payments",
-  purchaseController.addPurchasePayment
+    "/:id/payments",
+    authMiddleware,
+    businessMiddleware,
+    purchaseController.addPurchasePayment
 );
-
 
 // =====================================
 // PURCHASE DETAILS
 // =====================================
 router.get(
-  "/details/:id",
-  purchaseController.getPurchaseDetails
+    "/details/:id",
+    authMiddleware,
+    businessMiddleware,
+    purchaseController.getPurchaseDetails
 );
-
 
 // =====================================
 // GET SINGLE PURCHASE
 // =====================================
 router.get(
-  "/:id",
-  purchaseController.getPurchase
+    "/:id",
+    authMiddleware,
+    businessMiddleware,
+    purchaseController.getPurchase
 );
-
 
 // =====================================
 // UPDATE PURCHASE
 // =====================================
 router.put(
-  "/:id",
-  purchaseController.updatePurchase
+    "/:id",
+    authMiddleware,
+    businessMiddleware,
+    purchaseController.updatePurchase
 );
-
 
 // =====================================
 // DELETE PURCHASE
 // =====================================
 router.delete(
-  "/:id",
-  purchaseController.deletePurchase
+    "/:id",
+    authMiddleware,
+    businessMiddleware,
+    purchaseController.deletePurchase
 );
-
 
 module.exports = router;
