@@ -3,22 +3,68 @@ const router = express.Router();
 
 const saleController = require("../controllers/saleController");
 
-// Create Sale
-router.post("/create", saleController.createSale);
+const authMiddleware = require("../middleware/auth");
+const businessMiddleware = require("../middleware/businessMiddleware");
 
-// Get All Sales
-router.get("/", saleController.getSales);
+// =====================================
+// CREATE SALE
+// =====================================
+router.post(
+    "/create",
+    authMiddleware,
+    businessMiddleware,
+    saleController.createSale
+);
 
-// Invoice (keep before /:id)
-router.get("/invoice/:id", saleController.getInvoice);
+// =====================================
+// GET ALL SALES
+// =====================================
+router.get(
+    "/",
+    authMiddleware,
+    businessMiddleware,
+    saleController.getSales
+);
 
-// Update Payment
-router.put("/:id/payment", saleController.updatePaymentStatus);
+// =====================================
+// GET INVOICE
+// IMPORTANT: before /:id
+// =====================================
+router.get(
+    "/invoice/:id",
+    authMiddleware,
+    businessMiddleware,
+    saleController.getInvoice
+);
 
-// Get Single Sale
-router.get("/:id", saleController.getSale);
+// =====================================
+// UPDATE PAYMENT
+// =====================================
+router.put(
+    "/:id/payment",
+    authMiddleware,
+    businessMiddleware,
+    saleController.updatePaymentStatus
+);
 
-// Delete Sale
-router.delete("/:id", saleController.deleteSale);
+// =====================================
+// GET SINGLE SALE
+// =====================================
+router.get(
+    "/:id",
+    authMiddleware,
+    businessMiddleware,
+    saleController.getSale
+);
+
+// =====================================
+// DELETE SALE
+// =====================================
+router.delete(
+    "/:id",
+    authMiddleware,
+    businessMiddleware,
+    saleController.deleteSale
+);
 
 module.exports = router;
