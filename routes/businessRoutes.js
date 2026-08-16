@@ -1,34 +1,82 @@
 const express = require("express");
-
 const router = express.Router();
 
 const businessController = require("../controllers/businessController");
+const authMiddleware = require("../middleware/auth");
+const businessMiddleware = require("../middleware/businessMiddleware");
 
-// Create Business
-router.post("/create", businessController.createBusiness);
+// =====================================
+// CREATE BUSINESS
+// =====================================
+router.post(
+    "/create",
+    authMiddleware,
+    businessController.createBusiness
+);
 
-// Get All Businesses
-router.get("/", businessController.getAllBusinesses);
-
-// Get Single Business By Owner
-router.get("/:owner_id", businessController.getBusiness);
-
-// Update Business
-router.put("/:id", businessController.updateBusiness);
-
-// Delete Business
-router.delete("/:id", businessController.deleteBusiness);
-
-
-
+// =====================================
+// GET MY BUSINESS
+// =====================================
 router.get(
-    "/profile/:owner_id",
-    businessController.getBusinessProfile
+    "/",
+    authMiddleware,
+    businessMiddleware,
+    businessController.getMyBusiness
 );
 
+// =====================================
+// UPDATE MY BUSINESS
+// =====================================
 router.put(
-    "/profile/:id",
-    businessController.updateBusinessProfile
+    "/",
+    authMiddleware,
+    businessMiddleware,
+    businessController.updateMyBusiness
 );
+
+// =====================================
+// GET BUSINESS PROFILE (Protected)
+// =====================================
+router.get(
+    "/profile",
+    authMiddleware,
+    businessMiddleware,
+    businessController.getMyBusinessProfile
+);
+
+// =====================================
+// UPDATE BUSINESS PROFILE (Protected)
+// =====================================
+router.put(
+    "/profile",
+    authMiddleware,
+    businessMiddleware,
+    businessController.updateMyBusinessProfile
+);
+
+// =====================================
+// DEACTIVATE BUSINESS (Soft Delete)
+// =====================================
+router.put(
+    "/deactivate",
+    authMiddleware,
+    businessMiddleware,
+    businessController.deactivateBusiness
+);
+
+// =====================================
+// REACTIVATE BUSINESS
+// =====================================
+router.put(
+    "/reactivate",
+    authMiddleware,
+    businessMiddleware,
+    businessController.reactivateBusiness
+);
+
+// =====================================
+// ADMIN ONLY: GET ALL BUSINESSES
+// =====================================
+
 
 module.exports = router;
