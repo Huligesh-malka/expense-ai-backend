@@ -1,14 +1,18 @@
 const express = require("express");
-
 const router = express.Router();
 
 const categoryController = require("../controllers/categoryController");
+
+const authMiddleware = require("../middleware/auth");
+const businessMiddleware = require("../middleware/businessMiddleware");
 
 // =========================
 // Create Category
 // =========================
 router.post(
     "/create",
+    authMiddleware,
+    businessMiddleware,
     categoryController.createCategory
 );
 
@@ -17,6 +21,8 @@ router.post(
 // =========================
 router.get(
     "/business/:businessId",
+    authMiddleware,
+    businessMiddleware,
     categoryController.getCategories
 );
 
@@ -25,6 +31,8 @@ router.get(
 // =========================
 router.get(
     "/:id",
+    authMiddleware,
+    businessMiddleware,
     categoryController.getCategoryById
 );
 
@@ -33,6 +41,8 @@ router.get(
 // =========================
 router.put(
     "/:id",
+    authMiddleware,
+    businessMiddleware,
     categoryController.updateCategory
 );
 
@@ -41,6 +51,8 @@ router.put(
 // =========================
 router.delete(
     "/:id",
+    authMiddleware,
+    businessMiddleware,
     categoryController.deleteCategory
 );
 
