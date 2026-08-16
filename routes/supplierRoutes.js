@@ -6,12 +6,72 @@ const supplierController = require("../controllers/supplierController");
 const authMiddleware = require("../middleware/auth");
 const businessMiddleware = require("../middleware/businessMiddleware");
 
-// All routes protected with both middlewares
-router.post("/", authMiddleware, businessMiddleware, supplierController.createSupplier);
-router.get("/", authMiddleware, businessMiddleware, supplierController.getSuppliers);
-router.get("/dashboard", authMiddleware, businessMiddleware, supplierController.getSupplierDashboard);
-router.get("/:id", authMiddleware, businessMiddleware, supplierController.getSupplier);
-router.put("/:id", authMiddleware, businessMiddleware, supplierController.updateSupplier);
-router.put("/:id/status", authMiddleware, businessMiddleware, supplierController.updateSupplierStatus);
+// =====================================
+// CREATE SUPPLIER
+// =====================================
+
+router.post(
+    "/",
+    authMiddleware,
+    businessMiddleware,
+    supplierController.createSupplier
+);
+
+// =====================================
+// GET ALL SUPPLIERS
+// =====================================
+
+router.get(
+    "/",
+    authMiddleware,
+    businessMiddleware,
+    supplierController.getSuppliers
+);
+
+// =====================================
+// SUPPLIER DASHBOARD
+// IMPORTANT: MUST be before /:id
+// =====================================
+
+router.get(
+    "/dashboard",
+    authMiddleware,
+    businessMiddleware,
+    supplierController.getSupplierDashboard
+);
+
+// =====================================
+// UPDATE SUPPLIER STATUS (ACTIVATE/INACTIVATE)
+// IMPORTANT: MUST be before /:id
+// =====================================
+
+router.put(
+    "/:id/status",
+    authMiddleware,
+    businessMiddleware,
+    supplierController.updateSupplierStatus
+);
+
+// =====================================
+// GET SINGLE SUPPLIER
+// =====================================
+
+router.get(
+    "/:id",
+    authMiddleware,
+    businessMiddleware,
+    supplierController.getSupplier
+);
+
+// =====================================
+// UPDATE SUPPLIER
+// =====================================
+
+router.put(
+    "/:id",
+    authMiddleware,
+    businessMiddleware,
+    supplierController.updateSupplier
+);
 
 module.exports = router;
