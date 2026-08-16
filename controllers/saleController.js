@@ -1,7 +1,7 @@
 const db = require("../config/db");
 
 // =====================================
-// HELPER FUNCTIONS (unchanged)
+// HELPER FUNCTIONS
 // =====================================
 
 /**
@@ -599,5 +599,72 @@ exports.deleteSale = async (req, res) => {
         });
     } finally {
         conn.release();
+    }
+};
+
+// =====================================
+// GET SALES REPORT - SECURED
+// =====================================
+
+exports.getSalesReport = async (req, res) => {
+    try {
+        const businessId = req.businessId;
+        const { startDate, endDate } = req.query;
+
+        if (!businessId) {
+            return res.status(400).json({
+                success: false,
+                message: "Business not found"
+            });
+        }
+
+        let query = `
+            SELECT 
+                DATE(created_at) as date,
+                COUNT(*) as total_orders,
+                SUM(total_amount) as total_revenue,
+                SUM(tax) as total_tax,
+                SUM(discount) as total_discount,
+                AVG(total_amount) as average_order_value
+            FROM sales
+            WHERE business_id = ?
+        `;
+
+        const params = [businessId];
+
+        if (startDate && endDate) {
+            query += ` AND DATE(created_at) BETWEEN ? AND ?`;
+            params.push(startDate, endDate);
+        }
+
+        query += ` GROUP BY DATE(created_at) ORDER BY date DESC`;
+
+        const [report] = await db.query(query, params);
+
+        // Get summary totals
+        const [summary] = await db.query(
+            `SELECT 
+                COUNT(*) as total_orders,
+                SUM(total_amount) as total_revenue,
+                SUM(tax) as total_tax,
+                SUM(discount) as total_discount,
+                AVG(total_amount) as average_order_value
+            FROM sales
+            WHERE business_id = ?
+            ${startDate && endDate ? 'AND DATE(created_at) BETWEEN ? AND ?' : ''}`,
+            startDate && endDate ? [businessId, startDate, endDate] : [businessId]
+        );
+
+        res.json({
+            success: true,
+            summary: summary[0],
+            report
+        });
+
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
 };
