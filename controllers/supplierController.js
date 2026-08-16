@@ -6,9 +6,9 @@ const db = require("../config/db");
 
 exports.createSupplier = async (req, res) => {
     try {
+        const businessId = req.businessId;
 
         const {
-            business_id,
             supplier_name,
             company_name,
             supplier_phone,
@@ -21,13 +21,6 @@ exports.createSupplier = async (req, res) => {
             opening_balance,
             notes
         } = req.body;
-
-        if (!business_id) {
-            return res.status(400).json({
-                success: false,
-                message: "Business ID is required"
-            });
-        }
 
         if (!supplier_name) {
             return res.status(400).json({
@@ -49,10 +42,7 @@ exports.createSupplier = async (req, res) => {
              FROM suppliers
              WHERE business_id=?
              AND supplier_phone=?`,
-            [
-                business_id,
-                supplier_phone
-            ]
+            [businessId, supplier_phone]
         );
 
         if (existing.length > 0) {
@@ -81,7 +71,7 @@ exports.createSupplier = async (req, res) => {
             VALUES
             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-                business_id,
+                businessId,
                 supplier_name,
                 company_name || null,
                 supplier_phone,
@@ -103,37 +93,21 @@ exports.createSupplier = async (req, res) => {
         });
 
     } catch (err) {
-
         console.log(err);
-
         res.status(500).json({
             success: false,
             message: err.message
         });
-
     }
 };
 
-
-
-// =====================================
-// GET ALL SUPPLIERS
-// =====================================
 // =====================================
 // GET ALL SUPPLIERS
 // =====================================
 
 exports.getSuppliers = async (req, res) => {
     try {
-
-        const business_id = req.query.business_id;
-
-        if (!business_id) {
-            return res.status(400).json({
-                success: false,
-                message: "Business ID is required"
-            });
-        }
+        const businessId = req.businessId;
 
         const [suppliers] = await db.query(
             `SELECT
@@ -161,7 +135,7 @@ exports.getSuppliers = async (req, res) => {
             FROM suppliers s
             WHERE s.business_id = ?
             ORDER BY s.id DESC`,
-            [business_id]
+            [businessId]
         );
 
         res.json({
@@ -171,28 +145,22 @@ exports.getSuppliers = async (req, res) => {
         });
 
     } catch (err) {
-
         console.log(err);
-
         res.status(500).json({
             success: false,
             message: err.message
         });
-
     }
 };
-
-
 
 // =====================================
 // GET SINGLE SUPPLIER
 // =====================================
 
 exports.getSupplier = async (req, res) => {
-
     try {
-
         const { id } = req.params;
+        const businessId = req.businessId;
 
         const [supplier] = await db.query(
             `SELECT
@@ -213,8 +181,9 @@ exports.getSupplier = async (req, res) => {
                 created_at,
                 updated_at
             FROM suppliers
-            WHERE id=?`,
-            [id]
+            WHERE id=?
+            AND business_id=?`,
+            [id, businessId]
         );
 
         if (supplier.length === 0) {
@@ -230,31 +199,22 @@ exports.getSupplier = async (req, res) => {
         });
 
     } catch (err) {
-
         console.log(err);
-
         res.status(500).json({
             success: false,
             message: err.message
         });
-
     }
-
 };
-
-
-
-
 
 // =====================================
 // UPDATE SUPPLIER
 // =====================================
 
 exports.updateSupplier = async (req, res) => {
-
     try {
-
         const { id } = req.params;
+        const businessId = req.businessId;
 
         const {
             supplier_name,
@@ -271,10 +231,10 @@ exports.updateSupplier = async (req, res) => {
             status
         } = req.body;
 
-        // Check Supplier
+        // Check Supplier belongs to this business
         const [supplier] = await db.query(
-            "SELECT * FROM suppliers WHERE id=?",
-            [id]
+            "SELECT * FROM suppliers WHERE id=? AND business_id=?",
+            [id, businessId]
         );
 
         if (supplier.length === 0) {
@@ -286,18 +246,13 @@ exports.updateSupplier = async (req, res) => {
 
         // Duplicate Phone Check
         if (supplier_phone) {
-
             const [exist] = await db.query(
                 `SELECT id
                  FROM suppliers
                  WHERE supplier_phone=?
                  AND id<>?
                  AND business_id=?`,
-                [
-                    supplier_phone,
-                    id,
-                    supplier[0].business_id
-                ]
+                [supplier_phone, id, businessId]
             );
 
             if (exist.length > 0) {
@@ -306,7 +261,6 @@ exports.updateSupplier = async (req, res) => {
                     message: "Phone number already exists"
                 });
             }
-
         }
 
         await db.query(
@@ -324,7 +278,8 @@ exports.updateSupplier = async (req, res) => {
                 opening_balance=?,
                 notes=?,
                 status=?
-             WHERE id=?`,
+             WHERE id=?
+             AND business_id=?`,
             [
                 supplier_name || supplier[0].supplier_name,
                 company_name || supplier[0].company_name,
@@ -338,7 +293,8 @@ exports.updateSupplier = async (req, res) => {
                 opening_balance ?? supplier[0].opening_balance,
                 notes || supplier[0].notes,
                 status || supplier[0].status,
-                id
+                id,
+                businessId
             ]
         );
 
@@ -348,73 +304,56 @@ exports.updateSupplier = async (req, res) => {
         });
 
     } catch (err) {
-
         console.log(err);
-
         res.status(500).json({
             success: false,
             message: err.message
         });
-
     }
-
 };
 
-
-
-
-// =====================================
-// DELETE SUPPLIER
-// =====================================
 // =====================================
 // UPDATE SUPPLIER STATUS
 // ACTIVE / INACTIVE
 // =====================================
 
 exports.updateSupplierStatus = async (req, res) => {
-
     try {
-
         const { id } = req.params;
         const { status } = req.body;
+        const businessId = req.businessId;
 
         // Validate status
         if (!["active", "inactive"].includes(status)) {
-
             return res.status(400).json({
                 success: false,
                 message: "Status must be active or inactive"
             });
-
         }
 
-        // Check supplier
+        // Check supplier belongs to this business
         const [supplier] = await db.query(
-            `
-            SELECT id, supplier_name, status
+            `SELECT id, supplier_name, status
             FROM suppliers
             WHERE id=?
-            `,
-            [id]
+            AND business_id=?`,
+            [id, businessId]
         );
 
         if (supplier.length === 0) {
-
             return res.status(404).json({
                 success: false,
                 message: "Supplier not found"
             });
-
         }
 
         // Update only status
         await db.query(
-            `
-            UPDATE suppliers
+            `UPDATE suppliers
             SET status=?
             WHERE id=?
-            `,
-            [status, id]
+            AND business_id=?`,
+            [status, id, businessId]
         );
 
         res.json({
@@ -423,7 +362,6 @@ exports.updateSupplierStatus = async (req, res) => {
                 status === "active"
                     ? "Supplier activated successfully"
                     : "Supplier made inactive successfully",
-
             data: {
                 id: supplier[0].id,
                 supplier_name: supplier[0].supplier_name,
@@ -432,46 +370,27 @@ exports.updateSupplierStatus = async (req, res) => {
         });
 
     } catch (err) {
-
         console.log(err);
-
         res.status(500).json({
             success: false,
             message: err.message
         });
-
     }
-
 };
-
-
-
-
 
 // =====================================
 // SUPPLIER DASHBOARD
 // =====================================
 
 exports.getSupplierDashboard = async (req, res) => {
-
     try {
-
-        const business_id = req.query.business_id;
-
-        if (!business_id) {
-
-            return res.status(400).json({
-                success: false,
-                message: "Business ID is required"
-            });
-
-        }
+        const businessId = req.businessId;
 
         const [[totalSuppliers]] = await db.query(
             `SELECT COUNT(*) AS total
              FROM suppliers
              WHERE business_id=?`,
-            [business_id]
+            [businessId]
         );
 
         const [[activeSuppliers]] = await db.query(
@@ -479,7 +398,7 @@ exports.getSupplierDashboard = async (req, res) => {
              FROM suppliers
              WHERE business_id=?
              AND status='active'`,
-            [business_id]
+            [businessId]
         );
 
         const [[inactiveSuppliers]] = await db.query(
@@ -487,7 +406,7 @@ exports.getSupplierDashboard = async (req, res) => {
              FROM suppliers
              WHERE business_id=?
              AND status='inactive'`,
-            [business_id]
+            [businessId]
         );
 
         const [[openingBalance]] = await db.query(
@@ -495,7 +414,7 @@ exports.getSupplierDashboard = async (req, res) => {
                 IFNULL(SUM(opening_balance),0) AS total
              FROM suppliers
              WHERE business_id=?`,
-            [business_id]
+            [businessId]
         );
 
         res.json({
@@ -509,14 +428,10 @@ exports.getSupplierDashboard = async (req, res) => {
         });
 
     } catch (err) {
-
         console.log(err);
-
         res.status(500).json({
             success: false,
             message: err.message
         });
-
     }
-
 };

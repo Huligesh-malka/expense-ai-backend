@@ -1,28 +1,17 @@
 const express = require("express");
-
 const router = express.Router();
 
 const supplierController = require("../controllers/supplierController");
 
-// Create Supplier
-router.post("/", supplierController.createSupplier);
+const authMiddleware = require("../middleware/auth");
+const businessMiddleware = require("../middleware/businessMiddleware");
 
-// Get All Suppliers
-router.get("/", supplierController.getSuppliers);
-
-// Supplier Dashboard
-router.get("/dashboard", supplierController.getSupplierDashboard);
-
-// Get Single Supplier
-router.get("/:id", supplierController.getSupplier);
-
-// Update Supplier
-router.put("/:id", supplierController.updateSupplier);
-
-// Delete Supplier
-router.put(
-    "/:id/status",
-    supplierController.updateSupplierStatus
-);
+// All routes protected with both middlewares
+router.post("/", authMiddleware, businessMiddleware, supplierController.createSupplier);
+router.get("/", authMiddleware, businessMiddleware, supplierController.getSuppliers);
+router.get("/dashboard", authMiddleware, businessMiddleware, supplierController.getSupplierDashboard);
+router.get("/:id", authMiddleware, businessMiddleware, supplierController.getSupplier);
+router.put("/:id", authMiddleware, businessMiddleware, supplierController.updateSupplier);
+router.put("/:id/status", authMiddleware, businessMiddleware, supplierController.updateSupplierStatus);
 
 module.exports = router;
