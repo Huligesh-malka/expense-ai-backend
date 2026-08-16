@@ -2,10 +2,11 @@ const db = require("../config/db");
 
 module.exports = async (req, res, next) => {
     try {
+
         const businessId = Number(
             req.params.businessId ||
             req.query.business_id ||
-            req.body.business_id
+            req.body?.business_id
         );
 
         if (!businessId) {
@@ -42,6 +43,7 @@ module.exports = async (req, res, next) => {
         next();
 
     } catch (err) {
+
         console.error("Business Authorization Error:", err);
 
         return res.status(500).json({
