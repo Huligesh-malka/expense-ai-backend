@@ -2,7 +2,7 @@ const db = require("../config/db");
 
 exports.getDashboard = async (req, res) => {
     try {
-        const businessId = Number(req.query.business_id);
+        const businessId = req.businessId;
 
         if (!businessId) {
             return res.status(400).json({

@@ -1,10 +1,16 @@
-// Expense AI Backend
 const express = require("express");
-
 const router = express.Router();
 
 const dashboardController = require("../controllers/dashboardController");
 
-router.get("/", dashboardController.getDashboard);
+const authMiddleware = require("../middleware/authMiddleware");
+const businessMiddleware = require("../middleware/businessMiddleware");
+
+router.get(
+    "/",
+    authMiddleware,
+    businessMiddleware,
+    dashboardController.getDashboard
+);
 
 module.exports = router;
