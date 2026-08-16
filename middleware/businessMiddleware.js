@@ -3,19 +3,6 @@ const db = require("../config/db");
 module.exports = async (req, res, next) => {
     try {
 
-        const businessId = Number(
-            req.params.businessId ||
-            req.query.business_id ||
-            req.body?.business_id
-        );
-
-        if (!businessId) {
-            return res.status(400).json({
-                success: false,
-                message: "Business ID is required"
-            });
-        }
-
         if (!req.user || !req.user.id) {
             return res.status(401).json({
                 success: false,
@@ -23,22 +10,22 @@ module.exports = async (req, res, next) => {
             });
         }
 
-        const [business] = await db.query(
+        const [businesses] = await db.query(
             `SELECT id
              FROM businesses
-             WHERE id=? AND owner_id=?
+             WHERE owner_id=?
              LIMIT 1`,
-            [businessId, req.user.id]
+            [req.user.id]
         );
 
-        if (business.length === 0) {
+        if (businesses.length === 0) {
             return res.status(403).json({
                 success: false,
-                message: "You are not authorized to access this business"
+                message: "Business not found"
             });
         }
 
-        req.businessId = businessId;
+        req.businessId = businesses[0].id;
 
         next();
 
