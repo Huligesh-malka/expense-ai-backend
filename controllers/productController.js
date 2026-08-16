@@ -6,8 +6,9 @@ const db = require("../config/db");
 
 exports.createProduct = async (req, res) => {
     try {
+        const business_id = Number(req.businessId);
+        
         let {
-            business_id,
             category,
             product_name,
             product_code,
@@ -33,7 +34,6 @@ exports.createProduct = async (req, res) => {
         if (description) description = description.trim();
 
         // Convert to numbers
-        business_id = Number(business_id);
         purchase_price = Number(purchase_price) || 0;
         selling_price = Number(selling_price) || 0;
         price_per = Number(price_per) || 1;
@@ -170,8 +170,8 @@ exports.createProduct = async (req, res) => {
 
         // Fetch and return the created product
         const [newProduct] = await db.query(
-            "SELECT * FROM products WHERE id = ?",
-            [result.insertId]
+            "SELECT * FROM products WHERE id = ? AND business_id = ?",
+            [result.insertId, business_id]
         );
 
         res.status(201).json({
@@ -195,7 +195,7 @@ exports.createProduct = async (req, res) => {
 
 exports.getProducts = async (req, res) => {
     try {
-        const businessId = req.query.business_id;
+        const businessId = req.businessId;
 
         const [rows] = await db.query(
             `SELECT *
@@ -212,10 +212,10 @@ exports.getProducts = async (req, res) => {
         });
 
     } catch (err) {
-        console.log(err);
+        console.error("Get Products Error:", err);
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Failed to fetch products"
         });
     }
 };
@@ -227,10 +227,15 @@ exports.getProducts = async (req, res) => {
 exports.getProduct = async (req, res) => {
     try {
         const { id } = req.params;
+        const businessId = req.businessId;
 
         const [rows] = await db.query(
-            "SELECT * FROM products WHERE id=?",
-            [id]
+            `SELECT *
+             FROM products
+             WHERE id=?
+             AND business_id=?
+             LIMIT 1`,
+            [id, businessId]
         );
 
         if (rows.length === 0) {
@@ -246,10 +251,10 @@ exports.getProduct = async (req, res) => {
         });
 
     } catch (err) {
-        console.log(err);
+        console.error("Get Product Error:", err);
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Failed to fetch product"
         });
     }
 };
@@ -261,6 +266,7 @@ exports.getProduct = async (req, res) => {
 exports.updateProduct = async (req, res) => {
     try {
         const { id } = req.params;
+        const businessId = req.businessId;
 
         let {
             category,
@@ -336,10 +342,14 @@ exports.updateProduct = async (req, res) => {
             });
         }
 
-        // Check Product
+        // Check Product - SECURED with business_id
         const [product] = await db.query(
-            "SELECT * FROM products WHERE id=?",
-            [id]
+            `SELECT *
+             FROM products
+             WHERE id=?
+             AND business_id=?
+             LIMIT 1`,
+            [id, businessId]
         );
 
         if (product.length === 0) {
@@ -370,7 +380,7 @@ exports.updateProduct = async (req, res) => {
             });
         }
 
-        // Duplicate Product Name
+        // Duplicate Product Name - SECURED with business_id
         const [exist] = await db.query(
             `SELECT id
             FROM products
@@ -378,7 +388,7 @@ exports.updateProduct = async (req, res) => {
             AND product_name=?
             AND id<>?`,
             [
-                product[0].business_id,
+                businessId,
                 product_name,
                 id
             ]
@@ -391,7 +401,7 @@ exports.updateProduct = async (req, res) => {
             });
         }
 
-        // Duplicate Barcode
+        // Duplicate Barcode - SECURED with business_id
         if (barcode) {
             const [barcodeExist] = await db.query(
                 `SELECT id
@@ -400,7 +410,7 @@ exports.updateProduct = async (req, res) => {
                  AND barcode=?
                  AND id<>?`,
                 [
-                    product[0].business_id,
+                    businessId,
                     barcode,
                     id
                 ]
@@ -414,7 +424,8 @@ exports.updateProduct = async (req, res) => {
             }
         }
 
-        await db.query(
+        // Update - SECURED with business_id
+        const [updateResult] = await db.query(
             `UPDATE products
             SET
                 category=?,
@@ -433,7 +444,8 @@ exports.updateProduct = async (req, res) => {
                 description=?,
                 expiry_date=?,
                 status=?
-            WHERE id=?`,
+            WHERE id=?
+            AND business_id=?`,
             [
                 category,
                 product_name,
@@ -451,14 +463,22 @@ exports.updateProduct = async (req, res) => {
                 description || null,
                 expiry_date || null,
                 status || "active",
-                id
+                id,
+                businessId
             ]
         );
 
-        // Fetch and return the updated product
+        if (updateResult.affectedRows === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Product not found or no changes made"
+            });
+        }
+
+        // Fetch and return the updated product - SECURED with business_id
         const [updatedProduct] = await db.query(
-            "SELECT * FROM products WHERE id = ?",
-            [id]
+            "SELECT * FROM products WHERE id = ? AND business_id = ?",
+            [id, businessId]
         );
 
         res.json({
@@ -468,10 +488,10 @@ exports.updateProduct = async (req, res) => {
         });
 
     } catch (err) {
-        console.log(err);
+        console.error("Update Product Error:", err);
         res.status(500).json({
             success: false,
-            message: err.message
+            message: err.message || "Failed to update product"
         });
     }
 };
@@ -483,11 +503,21 @@ exports.updateProduct = async (req, res) => {
 exports.deleteProduct = async (req, res) => {
     try {
         const { id } = req.params;
+        const businessId = req.businessId;
 
-        await db.query(
-            "DELETE FROM products WHERE id=?",
-            [id]
+        const [result] = await db.query(
+            `DELETE FROM products
+             WHERE id=?
+             AND business_id=?`,
+            [id, businessId]
         );
+
+        if (result.affectedRows === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Product not found"
+            });
+        }
 
         res.json({
             success: true,
@@ -495,10 +525,10 @@ exports.deleteProduct = async (req, res) => {
         });
 
     } catch (err) {
-        console.log(err);
+        console.error("Delete Product Error:", err);
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Failed to delete product"
         });
     }
 };
@@ -509,10 +539,11 @@ exports.deleteProduct = async (req, res) => {
 
 exports.getProductsByCategory = async (req, res) => {
     try {
-        const { business_id, category } = req.query;
+        const businessId = req.businessId;
+        const { category } = req.query;
 
         let query = "SELECT * FROM products WHERE business_id=?";
-        let params = [business_id];
+        let params = [businessId];
 
         if (category) {
             query += " AND category=?";
@@ -530,10 +561,10 @@ exports.getProductsByCategory = async (req, res) => {
         });
 
     } catch (err) {
-        console.log(err);
+        console.error("Get Products By Category Error:", err);
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Failed to fetch products by category"
         });
     }
 };
@@ -545,9 +576,9 @@ exports.getProductsByCategory = async (req, res) => {
 exports.getProductByBarcode = async (req, res) => {
     try {
         const { barcode } = req.params;
-        const business_id = req.query.business_id;
+        const businessId = req.businessId;
 
-        if (!business_id) {
+        if (!businessId) {
             return res.status(400).json({
                 success: false,
                 message: "Business ID is required"
@@ -569,7 +600,7 @@ exports.getProductByBarcode = async (req, res) => {
              AND status='active'
              LIMIT 1`,
             [
-                business_id,
+                businessId,
                 barcode
             ]
         );
@@ -587,10 +618,10 @@ exports.getProductByBarcode = async (req, res) => {
         });
 
     } catch (err) {
-        console.log(err);
+        console.error("Get Product By Barcode Error:", err);
         res.status(500).json({
             success: false,
-            message: err.message
+            message: "Failed to fetch product by barcode"
         });
     }
 };
