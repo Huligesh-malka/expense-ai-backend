@@ -8,7 +8,7 @@ const businessMiddleware = require("../middleware/businessMiddleware");
 
 router.get(
     "/",
-    auth,
+    authMiddleware,
     businessMiddleware,
     dashboardController.getDashboard
 );
