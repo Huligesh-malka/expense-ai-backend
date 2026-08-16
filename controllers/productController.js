@@ -6,7 +6,7 @@ const db = require("../config/db");
 
 exports.createProduct = async (req, res) => {
     try {
-        const business_id = Number(req.businessId);
+        const businessId = Number(req.businessId);
         
         let {
             category,
@@ -42,13 +42,6 @@ exports.createProduct = async (req, res) => {
         tax = Number(tax) || 0;
 
         // Validate required fields
-        if (!business_id || isNaN(business_id)) {
-            return res.status(400).json({
-                success: false,
-                message: "Valid Business ID is required."
-            });
-        }
-
         if (!product_name || product_name === "") {
             return res.status(400).json({
                 success: false,
@@ -115,7 +108,7 @@ exports.createProduct = async (req, res) => {
         const [exist] = await db.query(
             `SELECT id FROM products 
             WHERE business_id=? AND product_name=?`,
-            [business_id, product_name]
+            [businessId, product_name]
         );
 
         if (exist.length > 0) {
@@ -130,7 +123,7 @@ exports.createProduct = async (req, res) => {
             const [existingBarcode] = await db.query(
                 `SELECT id FROM products
                  WHERE business_id=? AND barcode=?`,
-                [business_id, barcode]
+                [businessId, barcode]
             );
 
             if (existingBarcode.length > 0) {
@@ -149,7 +142,7 @@ exports.createProduct = async (req, res) => {
                 price_unit, stock, min_stock, unit, tax, image, description, expiry_date
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
-                business_id,
+                businessId,
                 category,
                 product_name,
                 product_code || null,
@@ -171,7 +164,7 @@ exports.createProduct = async (req, res) => {
         // Fetch and return the created product
         const [newProduct] = await db.query(
             "SELECT * FROM products WHERE id = ? AND business_id = ?",
-            [result.insertId, business_id]
+            [result.insertId, businessId]
         );
 
         res.status(201).json({
@@ -190,25 +183,65 @@ exports.createProduct = async (req, res) => {
 };
 
 // ============================
-// Get Products
+// Get Products (with pagination)
 // ============================
 
 exports.getProducts = async (req, res) => {
     try {
         const businessId = req.businessId;
+        
+        // Pagination parameters
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 20;
+        const offset = (page - 1) * limit;
+        
+        // Search/filter parameters
+        const search = req.query.search || '';
+        const status = req.query.status || 'active';
+        const category = req.query.category || '';
 
-        const [rows] = await db.query(
-            `SELECT *
-            FROM products
-            WHERE business_id=?
-            ORDER BY id DESC`,
-            [businessId]
-        );
+        let query = `SELECT * FROM products WHERE business_id=?`;
+        let params = [businessId];
+
+        // Add status filter
+        if (status) {
+            query += ` AND status=?`;
+            params.push(status);
+        }
+
+        // Add category filter
+        if (category) {
+            query += ` AND category=?`;
+            params.push(category);
+        }
+
+        // Add search filter
+        if (search) {
+            query += ` AND (product_name LIKE ? OR product_code LIKE ? OR barcode LIKE ?)`;
+            const searchPattern = `%${search}%`;
+            params.push(searchPattern, searchPattern, searchPattern);
+        }
+
+        // Count total records for pagination
+        const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) as total');
+        const [countResult] = await db.query(countQuery, params);
+        const total = countResult[0].total;
+
+        // Add ordering and pagination
+        query += ` ORDER BY id DESC LIMIT ? OFFSET ?`;
+        params.push(limit, offset);
+
+        const [rows] = await db.query(query, params);
 
         res.json({
             success: true,
-            total: rows.length,
-            data: rows
+            data: rows,
+            pagination: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit)
+            }
         });
 
     } catch (err) {
@@ -505,6 +538,21 @@ exports.deleteProduct = async (req, res) => {
         const { id } = req.params;
         const businessId = req.businessId;
 
+        // Check if product exists and belongs to business
+        const [product] = await db.query(
+            `SELECT id FROM products
+             WHERE id=?
+             AND business_id=?`,
+            [id, businessId]
+        );
+
+        if (product.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Product not found"
+            });
+        }
+
         const [result] = await db.query(
             `DELETE FROM products
              WHERE id=?
@@ -541,9 +589,16 @@ exports.getProductsByCategory = async (req, res) => {
     try {
         const businessId = req.businessId;
         const { category } = req.query;
+        const status = req.query.status || 'active';
 
         let query = "SELECT * FROM products WHERE business_id=?";
         let params = [businessId];
+
+        // Add status filter
+        if (status) {
+            query += " AND status=?";
+            params.push(status);
+        }
 
         if (category) {
             query += " AND category=?";
@@ -569,21 +624,14 @@ exports.getProductsByCategory = async (req, res) => {
     }
 };
 
-// =====================================
+// ============================
 // GET PRODUCT BY BARCODE
-// =====================================
+// ============================
 
 exports.getProductByBarcode = async (req, res) => {
     try {
         const { barcode } = req.params;
         const businessId = req.businessId;
-
-        if (!businessId) {
-            return res.status(400).json({
-                success: false,
-                message: "Business ID is required"
-            });
-        }
 
         if (!barcode) {
             return res.status(400).json({
@@ -622,6 +670,41 @@ exports.getProductByBarcode = async (req, res) => {
         res.status(500).json({
             success: false,
             message: "Failed to fetch product by barcode"
+        });
+    }
+};
+
+// ============================
+// GET LOW STOCK PRODUCTS
+// ============================
+
+exports.getLowStockProducts = async (req, res) => {
+    try {
+        const businessId = req.businessId;
+        const threshold = parseInt(req.query.threshold) || 5;
+
+        const [rows] = await db.query(
+            `SELECT *
+             FROM products
+             WHERE business_id=?
+             AND stock <= min_stock
+             AND status='active'
+             ORDER BY stock ASC`,
+            [businessId]
+        );
+
+        res.json({
+            success: true,
+            total: rows.length,
+            threshold,
+            data: rows
+        });
+
+    } catch (err) {
+        console.error("Get Low Stock Products Error:", err);
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch low stock products"
         });
     }
 };
