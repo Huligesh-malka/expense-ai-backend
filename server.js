@@ -19,7 +19,7 @@
     const ocrRoutes = require("./routes/ocrRoutes");
     const aiRoutes = require("./routes/aiRoutes");
 
-    const expenseRoutes = require("./routes/expenseRoutes");
+    
     const dashboardRoutes = require("./routes/dashboardRoutes");
 
     const purchaseRoutes = require("./routes/purchaseRoutes");
