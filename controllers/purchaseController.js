@@ -19,7 +19,6 @@ exports.createPurchase = async (req, res) => {
             discount,
             tax,
             payment_method,
-            payment_status,
             paid_amount,
             notes
         } = req.body;
@@ -47,6 +46,36 @@ exports.createPurchase = async (req, res) => {
                 success: false,
                 message: "Products are required"
             });
+        }
+
+        // Verify supplier belongs to this business
+        const [supplierCheck] = await connection.query(
+            "SELECT id FROM suppliers WHERE id = ? AND business_id = ?",
+            [supplier_id, businessId]
+        );
+
+        if (supplierCheck.length === 0) {
+            await connection.rollback();
+            return res.status(403).json({
+                success: false,
+                message: "Supplier not found or does not belong to your business"
+            });
+        }
+
+        // Verify all products belong to this business
+        for (const item of products) {
+            const [productCheck] = await connection.query(
+                "SELECT id FROM products WHERE id = ? AND business_id = ?",
+                [item.product_id, businessId]
+            );
+
+            if (productCheck.length === 0) {
+                await connection.rollback();
+                return res.status(403).json({
+                    success: false,
+                    message: `Product ${item.product_id} not found or does not belong to your business`
+                });
+            }
         }
 
         // =====================================
@@ -153,7 +182,6 @@ exports.createPurchase = async (req, res) => {
 
         // =====================================
         // CREATE INITIAL PAYMENT TRANSACTION
-        // IMPORTANT
         // =====================================
 
         if (paid > 0) {
@@ -254,8 +282,7 @@ exports.createPurchase = async (req, res) => {
 
             success: true,
 
-            message:
-                "Purchase created successfully",
+            message: "Purchase created successfully",
 
             purchaseId,
 
@@ -276,11 +303,9 @@ exports.createPurchase = async (req, res) => {
 
             success: false,
 
-            message:
-                "Failed to create purchase",
+            message: "Failed to create purchase",
 
-            error:
-                err.message
+            error: err.message
 
         });
 
@@ -329,13 +354,13 @@ exports.getPurchases = async (req, res) => {
             FROM purchases p
 
             LEFT JOIN suppliers s
-            ON p.supplier_id=s.id AND s.business_id = ?
+            ON p.supplier_id = s.id
 
-            WHERE p.business_id=?
+            WHERE p.business_id = ?
 
             ORDER BY p.id DESC`,
 
-            [businessId, businessId]
+            [businessId]
 
         );
 
@@ -351,7 +376,7 @@ exports.getPurchases = async (req, res) => {
 
     } catch (err) {
 
-        console.log(err);
+        console.error("Get Purchases Error:", err);
 
         res.status(500).json({
 
@@ -387,12 +412,11 @@ exports.getPurchase = async (req, res) => {
             FROM purchases p
 
             LEFT JOIN suppliers s
+            ON p.supplier_id = s.id
 
-            ON p.supplier_id=s.id AND s.business_id = ?
+            WHERE p.id = ? AND p.business_id = ?`,
 
-            WHERE p.id=? AND p.business_id = ?`,
-
-            [businessId, id, businessId]
+            [id, businessId]
 
         );
 
@@ -418,7 +442,7 @@ exports.getPurchase = async (req, res) => {
 
     } catch (err) {
 
-        console.log(err);
+        console.error("Get Purchase Error:", err);
 
         res.status(500).json({
 
@@ -454,12 +478,11 @@ exports.getPurchaseDetails = async (req, res) => {
             FROM purchases p
 
             LEFT JOIN suppliers s
+            ON p.supplier_id = s.id
 
-            ON p.supplier_id=s.id AND s.business_id = ?
+            WHERE p.id = ? AND p.business_id = ?`,
 
-            WHERE p.id=? AND p.business_id = ?`,
-
-            [businessId, id, businessId]
+            [id, businessId]
 
         );
 
@@ -498,12 +521,11 @@ exports.getPurchaseDetails = async (req, res) => {
             FROM purchase_items pi
 
             LEFT JOIN products pr
+            ON pi.product_id = pr.id
 
-            ON pi.product_id=pr.id AND pr.business_id = ?
+            WHERE pi.purchase_id = ?`,
 
-            WHERE pi.purchase_id=?`,
-
-            [businessId, id]
+            [id]
 
         );
 
@@ -519,7 +541,7 @@ exports.getPurchaseDetails = async (req, res) => {
 
     } catch (err) {
 
-        console.log(err);
+        console.error("Get Purchase Details Error:", err);
 
         res.status(500).json({
 
@@ -551,9 +573,9 @@ exports.purchaseDashboard = async (req, res) => {
 
         const [[totalPurchases]] = await db.query(
 
-            `SELECT COUNT(*) total
+            `SELECT COUNT(*) as total
              FROM purchases
-             WHERE business_id=?`,
+             WHERE business_id = ?`,
 
             [businessId]
 
@@ -561,9 +583,9 @@ exports.purchaseDashboard = async (req, res) => {
 
         const [[purchaseAmount]] = await db.query(
 
-            `SELECT IFNULL(SUM(total_amount),0) total
+            `SELECT IFNULL(SUM(total_amount), 0) as total
              FROM purchases
-             WHERE business_id=?`,
+             WHERE business_id = ?`,
 
             [businessId]
 
@@ -571,9 +593,9 @@ exports.purchaseDashboard = async (req, res) => {
 
         const [[paidAmount]] = await db.query(
 
-            `SELECT IFNULL(SUM(paid_amount),0) total
+            `SELECT IFNULL(SUM(paid_amount), 0) as total
              FROM purchases
-             WHERE business_id=?`,
+             WHERE business_id = ?`,
 
             [businessId]
 
@@ -581,9 +603,9 @@ exports.purchaseDashboard = async (req, res) => {
 
         const [[dueAmount]] = await db.query(
 
-            `SELECT IFNULL(SUM(due_amount),0) total
+            `SELECT IFNULL(SUM(due_amount), 0) as total
              FROM purchases
-             WHERE business_id=?`,
+             WHERE business_id = ?`,
 
             [businessId]
 
@@ -609,7 +631,7 @@ exports.purchaseDashboard = async (req, res) => {
 
     } catch (err) {
 
-        console.log(err);
+        console.error("Purchase Dashboard Error:", err);
 
         res.status(500).json({
 
@@ -645,7 +667,7 @@ exports.updatePurchase = async (req, res) => {
         } = req.body;
 
         const [purchase] = await connection.query(
-            "SELECT * FROM purchases WHERE id=? AND business_id = ?",
+            "SELECT * FROM purchases WHERE id = ? AND business_id = ?",
             [id, businessId]
         );
 
@@ -670,12 +692,12 @@ exports.updatePurchase = async (req, res) => {
 
             `UPDATE purchases
              SET
-                payment_method=?,
-                payment_status=?,
-                paid_amount=?,
-                due_amount=?,
-                notes=?
-             WHERE id=? AND business_id = ?`,
+                payment_method = ?,
+                payment_status = ?,
+                paid_amount = ?,
+                due_amount = ?,
+                notes = ?
+             WHERE id = ? AND business_id = ?`,
 
             [
                 payment_method || purchase[0].payment_method,
@@ -703,7 +725,7 @@ exports.updatePurchase = async (req, res) => {
 
         await connection.rollback();
 
-        console.log(err);
+        console.error("Update Purchase Error:", err);
 
         res.status(500).json({
 
@@ -737,7 +759,7 @@ exports.deletePurchase = async (req, res) => {
 
         const [purchase] = await connection.query(
 
-            "SELECT * FROM purchases WHERE id=? AND business_id = ?",
+            "SELECT * FROM purchases WHERE id = ? AND business_id = ?",
 
             [id, businessId]
 
@@ -760,7 +782,7 @@ exports.deletePurchase = async (req, res) => {
         // Get Purchase Items
         const [items] = await connection.query(
 
-            "SELECT * FROM purchase_items WHERE purchase_id=?",
+            "SELECT * FROM purchase_items WHERE purchase_id = ?",
 
             [id]
 
@@ -773,7 +795,7 @@ exports.deletePurchase = async (req, res) => {
 
                 `UPDATE products
                  SET stock = stock - ?
-                 WHERE id=? AND business_id = ?`,
+                 WHERE id = ? AND business_id = ?`,
 
                 [
                     item.quantity,
@@ -788,7 +810,7 @@ exports.deletePurchase = async (req, res) => {
         // Delete Items
         await connection.query(
 
-            "DELETE FROM purchase_items WHERE purchase_id=?",
+            "DELETE FROM purchase_items WHERE purchase_id = ?",
 
             [id]
 
@@ -797,7 +819,7 @@ exports.deletePurchase = async (req, res) => {
         // Delete Purchase
         await connection.query(
 
-            "DELETE FROM purchases WHERE id=? AND business_id = ?",
+            "DELETE FROM purchases WHERE id = ? AND business_id = ?",
 
             [id, businessId]
 
@@ -817,7 +839,7 @@ exports.deletePurchase = async (req, res) => {
 
         await connection.rollback();
 
-        console.log(err);
+        console.error("Delete Purchase Error:", err);
 
         res.status(500).json({
 
@@ -839,332 +861,329 @@ exports.deletePurchase = async (req, res) => {
 // GET SUPPLIER PURCHASES
 // =====================================
 exports.getSupplierPurchases = async (req, res) => {
-  try {
-    const { supplierId } = req.params;
-    const businessId = req.businessId;
+    try {
+        const { supplierId } = req.params;
+        const businessId = req.businessId;
 
-    if (!supplierId) {
-      return res.status(400).json({
-        success: false,
-        message: "Supplier ID is required"
-      });
+        if (!supplierId) {
+            return res.status(400).json({
+                success: false,
+                message: "Supplier ID is required"
+            });
+        }
+
+        // First verify the supplier belongs to this business
+        const [supplierCheck] = await db.query(
+            "SELECT id FROM suppliers WHERE id = ? AND business_id = ?",
+            [supplierId, businessId]
+        );
+
+        if (supplierCheck.length === 0) {
+            return res.status(403).json({
+                success: false,
+                message: "Supplier not found or does not belong to your business"
+            });
+        }
+
+        // Get all purchases for this supplier
+        const [rows] = await db.query(
+            `
+            SELECT
+                p.id,
+                p.invoice_no,
+                p.subtotal,
+                p.discount,
+                p.tax,
+                p.total_amount,
+                p.payment_method,
+                p.payment_status,
+                p.paid_amount,
+                p.due_amount,
+                p.notes,
+                p.created_at
+            FROM purchases p
+            WHERE p.supplier_id = ? AND p.business_id = ?
+            ORDER BY p.id DESC
+            `,
+            [supplierId, businessId]
+        );
+
+        res.json({
+            success: true,
+            total: rows.length,
+            data: rows
+        });
+
+    } catch (err) {
+        console.error("Get Supplier Purchases Error:", err);
+
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
-
-    // Verify supplier belongs to this business
-    const [supplier] = await db.query(
-      "SELECT id FROM suppliers WHERE id = ? AND business_id = ?",
-      [supplierId, businessId]
-    );
-
-    if (supplier.length === 0) {
-      return res.status(403).json({
-        success: false,
-        message: "Supplier not found or does not belong to your business"
-      });
-    }
-
-    const [rows] = await db.query(
-      `
-      SELECT
-        p.id,
-        p.invoice_no,
-        p.subtotal,
-        p.discount,
-        p.tax,
-        p.total_amount,
-        p.payment_method,
-        p.payment_status,
-        p.paid_amount,
-        p.due_amount,
-        p.notes,
-        p.created_at
-      FROM purchases p
-      WHERE p.supplier_id = ? AND p.business_id = ?
-      ORDER BY p.id DESC
-      `,
-      [supplierId, businessId]
-    );
-
-    res.json({
-      success: true,
-      total: rows.length,
-      data: rows
-    });
-
-  } catch (err) {
-    console.log(err);
-
-    res.status(500).json({
-      success: false,
-      message: err.message
-    });
-  }
 };
 
 // =====================================
 // ADD PURCHASE PAYMENT
 // =====================================
 exports.addPurchasePayment = async (req, res) => {
-  const connection = await db.getConnection();
+    const connection = await db.getConnection();
 
-  try {
-    await connection.beginTransaction();
+    try {
+        await connection.beginTransaction();
 
-    const { id } = req.params;
-    const businessId = req.businessId;
+        const { id } = req.params;
+        const businessId = req.businessId;
 
-    const {
-      amount,
-      payment_method,
-      reference_no,
-      payment_date,
-      notes
-    } = req.body;
+        const {
+            amount,
+            payment_method,
+            reference_no,
+            payment_date,
+            notes
+        } = req.body;
 
-    // -----------------------------
-    // Validate amount
-    // -----------------------------
+        // -----------------------------
+        // Validate amount
+        // -----------------------------
 
-    const paymentAmount = Number(amount);
+        const paymentAmount = Number(amount);
 
-    if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
-      await connection.rollback();
+        if (!Number.isFinite(paymentAmount) || paymentAmount <= 0) {
+            await connection.rollback();
 
-      return res.status(400).json({
-        success: false,
-        message: "Valid payment amount is required"
-      });
+            return res.status(400).json({
+                success: false,
+                message: "Valid payment amount is required"
+            });
+        }
+
+        // -----------------------------
+        // Get purchase with business check
+        // -----------------------------
+
+        const [purchaseRows] = await connection.query(
+            `
+            SELECT
+                id,
+                total_amount,
+                paid_amount,
+                due_amount
+            FROM purchases
+            WHERE id = ? AND business_id = ?
+            FOR UPDATE
+            `,
+            [id, businessId]
+        );
+
+        if (purchaseRows.length === 0) {
+            await connection.rollback();
+
+            return res.status(404).json({
+                success: false,
+                message: "Purchase not found"
+            });
+        }
+
+        const purchase = purchaseRows[0];
+
+        const totalAmount = Number(purchase.total_amount || 0);
+        const alreadyPaid = Number(purchase.paid_amount || 0);
+        const currentDue = Number(purchase.due_amount || 0);
+
+        // -----------------------------
+        // Already fully paid
+        // -----------------------------
+
+        if (currentDue <= 0) {
+            await connection.rollback();
+
+            return res.status(400).json({
+                success: false,
+                message: "This purchase is already fully paid"
+            });
+        }
+
+        // -----------------------------
+        // Prevent overpayment
+        // -----------------------------
+
+        if (paymentAmount > currentDue) {
+            await connection.rollback();
+
+            return res.status(400).json({
+                success: false,
+                message: `Payment cannot be greater than remaining balance ₹${currentDue.toFixed(2)}`
+            });
+        }
+
+        // -----------------------------
+        // Calculate new balance
+        // -----------------------------
+
+        const newPaidAmount = Number((alreadyPaid + paymentAmount).toFixed(2));
+        const newDueAmount = Number((totalAmount - newPaidAmount).toFixed(2));
+
+        let paymentStatus = "Partial";
+
+        if (newDueAmount <= 0) {
+            paymentStatus = "Paid";
+        }
+
+        // -----------------------------
+        // Create payment transaction
+        // -----------------------------
+
+        const [paymentResult] = await connection.query(
+            `
+            INSERT INTO purchase_payments
+            (
+                purchase_id,
+                amount,
+                payment_method,
+                reference_no,
+                payment_date,
+                notes
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            `,
+            [
+                id,
+                paymentAmount,
+                payment_method || "Cash",
+                reference_no || null,
+                payment_date || new Date(),
+                notes || null
+            ]
+        );
+
+        // -----------------------------
+        // Update purchase summary
+        // -----------------------------
+
+        await connection.query(
+            `
+            UPDATE purchases
+            SET
+                paid_amount = ?,
+                due_amount = ?,
+                payment_status = ?,
+                payment_method = ?
+            WHERE id = ? AND business_id = ?
+            `,
+            [
+                newPaidAmount,
+                newDueAmount,
+                paymentStatus,
+                payment_method || "Cash",
+                id,
+                businessId
+            ]
+        );
+
+        await connection.commit();
+
+        res.json({
+            success: true,
+            message: "Payment added successfully",
+
+            data: {
+                payment_id: paymentResult.insertId,
+                purchase_id: Number(id),
+
+                payment_amount: paymentAmount,
+
+                total_amount: totalAmount,
+                paid_amount: newPaidAmount,
+                due_amount: newDueAmount,
+
+                payment_status: paymentStatus
+            }
+        });
+
+    } catch (err) {
+
+        await connection.rollback();
+
+        console.error("Add Purchase Payment Error:", err);
+
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
+
+    } finally {
+        connection.release();
     }
-
-    // -----------------------------
-    // Get purchase
-    // -----------------------------
-
-    const [purchaseRows] = await connection.query(
-      `
-      SELECT
-        id,
-        total_amount,
-        paid_amount,
-        due_amount
-      FROM purchases
-      WHERE id = ? AND business_id = ?
-      FOR UPDATE
-      `,
-      [id, businessId]
-    );
-
-    if (purchaseRows.length === 0) {
-      await connection.rollback();
-
-      return res.status(404).json({
-        success: false,
-        message: "Purchase not found"
-      });
-    }
-
-    const purchase = purchaseRows[0];
-
-    const totalAmount = Number(purchase.total_amount || 0);
-    const alreadyPaid = Number(purchase.paid_amount || 0);
-    const currentDue = Number(purchase.due_amount || 0);
-
-    // -----------------------------
-    // Already fully paid
-    // -----------------------------
-
-    if (currentDue <= 0) {
-      await connection.rollback();
-
-      return res.status(400).json({
-        success: false,
-        message: "This purchase is already fully paid"
-      });
-    }
-
-    // -----------------------------
-    // Prevent overpayment
-    // -----------------------------
-
-    if (paymentAmount > currentDue) {
-      await connection.rollback();
-
-      return res.status(400).json({
-        success: false,
-        message:
-          `Payment cannot be greater than remaining balance ₹${currentDue.toFixed(2)}`
-      });
-    }
-
-    // -----------------------------
-    // Calculate new balance
-    // -----------------------------
-
-    const newPaidAmount =
-      Number((alreadyPaid + paymentAmount).toFixed(2));
-
-    const newDueAmount =
-      Number((totalAmount - newPaidAmount).toFixed(2));
-
-    let paymentStatus = "Partial";
-
-    if (newDueAmount <= 0) {
-      paymentStatus = "Paid";
-    }
-
-    // -----------------------------
-    // Create payment transaction
-    // -----------------------------
-
-    const [paymentResult] = await connection.query(
-      `
-      INSERT INTO purchase_payments
-      (
-        purchase_id,
-        amount,
-        payment_method,
-        reference_no,
-        payment_date,
-        notes
-      )
-      VALUES (?, ?, ?, ?, ?, ?)
-      `,
-      [
-        id,
-        paymentAmount,
-        payment_method || "Cash",
-        reference_no || null,
-        payment_date || new Date(),
-        notes || null
-      ]
-    );
-
-    // -----------------------------
-    // Update purchase summary
-    // -----------------------------
-
-    await connection.query(
-      `
-      UPDATE purchases
-      SET
-        paid_amount = ?,
-        due_amount = ?,
-        payment_status = ?,
-        payment_method = ?
-      WHERE id = ? AND business_id = ?
-      `,
-      [
-        newPaidAmount,
-        newDueAmount,
-        paymentStatus,
-        payment_method || "Cash",
-        id,
-        businessId
-      ]
-    );
-
-    await connection.commit();
-
-    res.json({
-      success: true,
-      message: "Payment added successfully",
-
-      data: {
-        payment_id: paymentResult.insertId,
-        purchase_id: Number(id),
-
-        payment_amount: paymentAmount,
-
-        total_amount: totalAmount,
-        paid_amount: newPaidAmount,
-        due_amount: newDueAmount,
-
-        payment_status: paymentStatus
-      }
-    });
-
-  } catch (err) {
-
-    await connection.rollback();
-
-    console.log(err);
-
-    res.status(500).json({
-      success: false,
-      message: err.message
-    });
-
-  } finally {
-    connection.release();
-  }
 };
 
 // =====================================
 // GET PURCHASE PAYMENT HISTORY
 // =====================================
 exports.getPurchasePayments = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const businessId = req.businessId;
+    try {
+        const { id } = req.params;
+        const businessId = req.businessId;
 
-    // Check purchase exists and belongs to business
-    const [purchaseRows] = await db.query(
-      `
-      SELECT
-        id,
-        invoice_no,
-        total_amount,
-        paid_amount,
-        due_amount,
-        payment_status
-      FROM purchases
-      WHERE id = ? AND business_id = ?
-      `,
-      [id, businessId]
-    );
+        // Check purchase exists and belongs to business
+        const [purchaseRows] = await db.query(
+            `
+            SELECT
+                id,
+                invoice_no,
+                total_amount,
+                paid_amount,
+                due_amount,
+                payment_status
+            FROM purchases
+            WHERE id = ? AND business_id = ?
+            `,
+            [id, businessId]
+        );
 
-    if (purchaseRows.length === 0) {
-      return res.status(404).json({
-        success: false,
-        message: "Purchase not found"
-      });
+        if (purchaseRows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Purchase not found"
+            });
+        }
+
+        const [payments] = await db.query(
+            `
+            SELECT
+                id,
+                purchase_id,
+                amount,
+                payment_method,
+                reference_no,
+                payment_date,
+                notes,
+                created_at
+            FROM purchase_payments
+            WHERE purchase_id = ?
+            ORDER BY payment_date ASC, id ASC
+            `,
+            [id]
+        );
+
+        res.json({
+            success: true,
+
+            purchase: purchaseRows[0],
+
+            total_payments: payments.length,
+
+            data: payments
+        });
+
+    } catch (err) {
+
+        console.error("Get Purchase Payments Error:", err);
+
+        res.status(500).json({
+            success: false,
+            message: err.message
+        });
     }
-
-    const [payments] = await db.query(
-      `
-      SELECT
-        id,
-        purchase_id,
-        amount,
-        payment_method,
-        reference_no,
-        payment_date,
-        notes,
-        created_at
-      FROM purchase_payments
-      WHERE purchase_id = ?
-      ORDER BY payment_date ASC, id ASC
-      `,
-      [id]
-    );
-
-    res.json({
-      success: true,
-
-      purchase: purchaseRows[0],
-
-      total_payments: payments.length,
-
-      data: payments
-    });
-
-  } catch (err) {
-
-    console.log(err);
-
-    res.status(500).json({
-      success: false,
-      message: err.message
-    });
-  }
 };
