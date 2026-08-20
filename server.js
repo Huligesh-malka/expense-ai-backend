@@ -1,149 +1,119 @@
-    require("dotenv").config();
+require("dotenv").config();
 
-    const express = require("express");
-    const cors = require("cors");
-    const path = require("path");
+const express = require("express");
+const cors = require("cors");
+const path = require("path");
 
-    const app = express();
+const app = express();
 
-    // ================================
-    // Database Connection
-    // ================================
-    require("./config/db");
+// ================================
+// Database Connection
+// ================================
+require("./config/db");
 
-    // ================================
-    // Routes
-    // ================================
-    const authRoutes = require("./routes/authRoutes");
-    const receiptRoutes = require("./routes/receiptRoutes");
-    const ocrRoutes = require("./routes/ocrRoutes");
-    const aiRoutes = require("./routes/aiRoutes");
+// ================================
+// Middleware
+// ================================
 
-    
-    const dashboardRoutes = require("./routes/dashboardRoutes");
+const corsOptions = {
+    origin: "https://expense-ai-frontend.vercel.app",
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true
+};
 
-    const purchaseRoutes = require("./routes/purchaseRoutes");
-    const userDashboardRoutes = require("./routes/userDashboardRoutes");
-    const shopLayoutRoutes=require("./routes/shopLayoutRoutes");
+app.use(cors(corsOptions));
 
+// Handle preflight requests explicitly
+app.options("*", cors(corsOptions));
 
+app.use(express.json());
 
+app.use(express.urlencoded({ extended: true }));
 
-    const categoryRoutes = require("./routes/categoryRoutes");
+// Serve uploaded files
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
+// ================================
+// Routes
+// ================================
+const authRoutes = require("./routes/authRoutes");
+const receiptRoutes = require("./routes/receiptRoutes");
+const ocrRoutes = require("./routes/ocrRoutes");
+const aiRoutes = require("./routes/aiRoutes");
 
-    const businessRoutes = require("./routes/businessRoutes");
-    const productRoutes = require("./routes/productRoutes");
+const dashboardRoutes = require("./routes/dashboardRoutes");
 
+const purchaseRoutes = require("./routes/purchaseRoutes");
+const userDashboardRoutes = require("./routes/userDashboardRoutes");
+const shopLayoutRoutes = require("./routes/shopLayoutRoutes");
 
-    const saleRoutes = require("./routes/saleRoutes");
-    const customerRoutes = require("./routes/customerRoutes");
+const categoryRoutes = require("./routes/categoryRoutes");
 
+const businessRoutes = require("./routes/businessRoutes");
+const productRoutes = require("./routes/productRoutes");
 
-    const supplierRoutes = require("./routes/supplierRoutes");
+const saleRoutes = require("./routes/saleRoutes");
+const customerRoutes = require("./routes/customerRoutes");
 
+const supplierRoutes = require("./routes/supplierRoutes");
 
-
-
-
-
-
-    // ================================
-    // Middleware
-    // ================================
-    app.use(cors());
-
-    app.use(express.json());
-
-    app.use(express.urlencoded({ extended: true }));
-
-    // Serve uploaded files
-    app.use("/uploads", express.static(path.join(__dirname, "uploads")));
-
-    // ================================
-    // Home Route
-    // ================================
-    app.get("/", (req, res) => {
-
-        res.status(200).json({
-            success: true,
-            project: "Expense AI Backend",
-            version: "1.0.0",
-            message: "Server Running Successfully 🚀"
-        });
-
+// ================================
+// Home Route
+// ================================
+app.get("/", (req, res) => {
+    res.status(200).json({
+        success: true,
+        project: "Expense AI Backend",
+        version: "1.0.0",
+        message: "Server Running Successfully 🚀"
     });
+});
 
-    // ================================
-    // API Routes
-    // ================================
-    app.use("/api/auth", authRoutes);
+// ================================
+// API Routes
+// ================================
+app.use("/api/auth", authRoutes);
+app.use("/api/receipts", receiptRoutes);
+app.use("/api/ocr", ocrRoutes);
+app.use("/api/ai", aiRoutes);
+app.use("/api/dashboard", dashboardRoutes);
+app.use("/api/business", businessRoutes);
+app.use("/api/categories", categoryRoutes);
+app.use("/api/customers", customerRoutes);
+app.use("/api/purchases", purchaseRoutes);
+app.use("/api/suppliers", supplierRoutes);
+app.use("/api/shop", shopLayoutRoutes);
+app.use("/api/user", userDashboardRoutes);
+app.use("/api/sales", saleRoutes);
+app.use("/api/products", productRoutes);
 
-    app.use("/api/receipts", receiptRoutes);
-
-
-    app.use("/api/ocr", ocrRoutes);
-
-
-    app.use("/api/ai", aiRoutes);
-
-    
-
-    app.use("/api/dashboard", dashboardRoutes);
-    app.use("/api/business", businessRoutes);
-
-    app.use("/api/categories", categoryRoutes);
-    app.use("/api/customers", customerRoutes);
-
-    app.use("/api/purchases", purchaseRoutes);
-
-
-    app.use("/api/suppliers", supplierRoutes);
-
-    app.use("/api/shop",shopLayoutRoutes);
-
-
-    app.use("/api/user", userDashboardRoutes);
-
-
-    app.use("/api/sales", saleRoutes);
-    // ================================
-
-
-
-    app.use("/api/products", productRoutes);
-    // 404 Route
-    // ================================
-    app.use((req, res) => {
-
-        res.status(404).json({
-            success: false,
-            message: "API Not Found"
-        });
-
+// ================================
+// 404 Route
+// ================================
+app.use((req, res) => {
+    res.status(404).json({
+        success: false,
+        message: "API Not Found"
     });
+});
 
-    // ================================
-    // Global Error Handler
-    // ================================
-    app.use((err, req, res, next) => {
-
-        console.error(err);
-
-        res.status(500).json({
-            success: false,
-            message: err.message || "Internal Server Error"
-        });
-
+// ================================
+// Global Error Handler
+// ================================
+app.use((err, req, res, next) => {
+    console.error(err);
+    res.status(500).json({
+        success: false,
+        message: err.message || "Internal Server Error"
     });
+});
 
-    // ================================
-    // Start Server
-    // ================================
-    const PORT = process.env.PORT || 5000;
+// ================================
+// Start Server
+// ================================
+const PORT = process.env.PORT || 5000;
 
-    app.listen(PORT, () => {
-
-        console.log(`🚀 Server Running on http://localhost:${PORT}`);
-
-    });
+app.listen(PORT, () => {
+    console.log(`🚀 Server Running on http://localhost:${PORT}`);
+});
