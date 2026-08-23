@@ -183,17 +183,12 @@ exports.createProduct = async (req, res) => {
 };
 
 // ============================
-// Get Products (with pagination)
+// Get Products (NO LIMIT - returns all products)
 // ============================
 
 exports.getProducts = async (req, res) => {
     try {
         const businessId = req.businessId;
-        
-        // Pagination parameters
-        const page = parseInt(req.query.page) || 1;
-        const limit = parseInt(req.query.limit) || 20;
-        const offset = (page - 1) * limit;
         
         // Search/filter parameters
         const search = req.query.search || '';
@@ -222,26 +217,15 @@ exports.getProducts = async (req, res) => {
             params.push(searchPattern, searchPattern, searchPattern);
         }
 
-        // Count total records for pagination
-        const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) as total');
-        const [countResult] = await db.query(countQuery, params);
-        const total = countResult[0].total;
-
-        // Add ordering and pagination
-        query += ` ORDER BY id DESC LIMIT ? OFFSET ?`;
-        params.push(limit, offset);
+        // Add ordering (no pagination)
+        query += ` ORDER BY id DESC`;
 
         const [rows] = await db.query(query, params);
 
         res.json({
             success: true,
-            data: rows,
-            pagination: {
-                total,
-                page,
-                limit,
-                totalPages: Math.ceil(total / limit)
-            }
+            total: rows.length,
+            data: rows
         });
 
     } catch (err) {
