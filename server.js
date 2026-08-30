@@ -19,6 +19,9 @@
     const ocrRoutes = require("./routes/ocrRoutes");
     const aiRoutes = require("./routes/aiRoutes");
 
+    const qrOrderRoutes = require("./routes/qrOrderRoutes");
+
+
     
     const dashboardRoutes = require("./routes/dashboardRoutes");
 
@@ -102,6 +105,9 @@
     app.use("/api/suppliers", supplierRoutes);
 
     app.use("/api/shop",shopLayoutRoutes);
+
+
+    app.use("/api/qr-order", qrOrderRoutes);
 
 
     app.use("/api/user", userDashboardRoutes);
