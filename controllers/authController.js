@@ -12,13 +12,20 @@ const {
 
 
 // =====================================
+// SECURITY SETTINGS
+// =====================================
+
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCK_DURATION_MINUTES = 5;
+
+
+// =====================================
 // CREATE JWT
 // =====================================
 
 const createToken = (user) => {
 
     return jwt.sign(
-
         {
             id: user.id,
             role: user.role
@@ -29,7 +36,6 @@ const createToken = (user) => {
         {
             expiresIn: "1h"
         }
-
     );
 
 };
@@ -205,9 +211,11 @@ exports.register = async (req, res) => {
                     email,
                     phone,
                     password,
-                    role
+                    role,
+                    failed_login_attempts,
+                    locked_until
                 )
-                VALUES (?, ?, ?, ?, 'user')
+                VALUES (?, ?, ?, ?, 'user', 0, NULL)
                 `,
 
                 [
@@ -272,6 +280,27 @@ exports.register = async (req, res) => {
             "Register Error:",
             err
         );
+
+
+        await logSecurityEvent({
+
+            eventType:
+                "REGISTER_SERVER_ERROR",
+
+            severity: "high",
+
+            req,
+
+            statusCode: 500,
+
+            details: {
+
+                reason:
+                    "Unexpected registration server error"
+
+            }
+
+        });
 
 
         return res.status(500).json({
@@ -416,6 +445,105 @@ exports.login = async (req, res) => {
 
 
         // =====================================
+        // CHECK ACCOUNT LOCK
+        // =====================================
+
+        if (user.locked_until) {
+
+            const lockedUntil =
+                new Date(user.locked_until);
+
+            const now =
+                new Date();
+
+
+            // =====================================
+            // STILL LOCKED
+            // =====================================
+
+            if (lockedUntil > now) {
+
+                const remainingSeconds =
+                    Math.ceil(
+                        (lockedUntil - now) / 1000
+                    );
+
+                const remainingMinutes =
+                    Math.ceil(
+                        remainingSeconds / 60
+                    );
+
+
+                await logSecurityEvent({
+
+                    userId:
+                        user.id,
+
+                    eventType:
+                        "LOGIN_BLOCKED_LOCKED",
+
+                    severity: "high",
+
+                    req,
+
+                    statusCode: 429,
+
+                    details: {
+
+                        reason:
+                            "Account temporarily locked",
+
+                        remainingSeconds,
+
+                        remainingMinutes
+
+                    }
+
+                });
+
+
+                return res.status(429).json({
+
+                    success: false,
+
+                    message:
+                        `Account temporarily locked. Try again in ${remainingMinutes} minute(s).`,
+
+                    locked: true,
+
+                    retryAfterSeconds:
+                        remainingSeconds
+
+                });
+
+            }
+
+
+            // =====================================
+            // LOCK EXPIRED
+            // =====================================
+
+            await db.query(
+
+                `
+                UPDATE users
+                SET
+                    failed_login_attempts = 0,
+                    locked_until = NULL
+                WHERE id = ?
+                `,
+
+                [user.id]
+
+            );
+
+            user.failed_login_attempts = 0;
+            user.locked_until = null;
+
+        }
+
+
+        // =====================================
         // GOOGLE-ONLY ACCOUNT
         // =====================================
 
@@ -477,6 +605,160 @@ exports.login = async (req, res) => {
 
         if (!valid) {
 
+            // Current attempts
+            const currentAttempts =
+                Number(
+                    user.failed_login_attempts || 0
+                );
+
+            // New attempt count
+            const newAttempts =
+                currentAttempts + 1;
+
+
+            // =====================================
+            // LOCK ACCOUNT AFTER 5 FAILURES
+            // =====================================
+
+            if (
+                newAttempts >=
+                MAX_LOGIN_ATTEMPTS
+            ) {
+
+                const lockedUntil =
+                    new Date(
+                        Date.now() +
+                        LOCK_DURATION_MINUTES *
+                        60 *
+                        1000
+                    );
+
+
+                await db.query(
+
+                    `
+                    UPDATE users
+                    SET
+                        failed_login_attempts = ?,
+                        locked_until = ?
+                    WHERE id = ?
+                    `,
+
+                    [
+                        newAttempts,
+                        lockedUntil,
+                        user.id
+                    ]
+
+                );
+
+
+                // =====================================
+                // LOGIN FAILED LOG
+                // =====================================
+
+                await logSecurityEvent({
+
+                    userId:
+                        user.id,
+
+                    eventType:
+                        "LOGIN_FAILED",
+
+                    severity: "high",
+
+                    req,
+
+                    statusCode: 401,
+
+                    details: {
+
+                        reason:
+                            "Wrong password",
+
+                        failedAttempts:
+                            newAttempts
+
+                    }
+
+                });
+
+
+                // =====================================
+                // ACCOUNT LOCK LOG
+                // =====================================
+
+                await logSecurityEvent({
+
+                    userId:
+                        user.id,
+
+                    eventType:
+                        "ACCOUNT_LOCKED",
+
+                    severity: "critical",
+
+                    req,
+
+                    statusCode: 429,
+
+                    details: {
+
+                        reason:
+                            "Maximum login attempts exceeded",
+
+                        failedAttempts:
+                            newAttempts,
+
+                        lockDurationMinutes:
+                            LOCK_DURATION_MINUTES
+
+                    }
+
+                });
+
+
+                return res.status(429).json({
+
+                    success: false,
+
+                    message:
+                        "Too many failed login attempts. Account locked for 5 minutes.",
+
+                    locked: true,
+
+                    retryAfterSeconds:
+                        LOCK_DURATION_MINUTES * 60
+
+                });
+
+            }
+
+
+            // =====================================
+            // UPDATE FAILED ATTEMPTS
+            // =====================================
+
+            await db.query(
+
+                `
+                UPDATE users
+                SET failed_login_attempts = ?
+                WHERE id = ?
+                `,
+
+                [
+                    newAttempts,
+                    user.id
+                ]
+
+            );
+
+
+            // =====================================
+            // SECURITY LOG
+            // =====================================
+
             await logSecurityEvent({
 
                 userId:
@@ -494,7 +776,14 @@ exports.login = async (req, res) => {
                 details: {
 
                     reason:
-                        "Wrong password"
+                        "Wrong password",
+
+                    failedAttempts:
+                        newAttempts,
+
+                    remainingAttempts:
+                        MAX_LOGIN_ATTEMPTS -
+                        newAttempts
 
                 }
 
@@ -506,11 +795,35 @@ exports.login = async (req, res) => {
                 success: false,
 
                 message:
-                    "Invalid email or password"
+                    "Invalid email or password",
+
+                remainingAttempts:
+                    MAX_LOGIN_ATTEMPTS -
+                    newAttempts
 
             });
 
         }
+
+
+        // =====================================
+        // SUCCESSFUL PASSWORD LOGIN
+        // RESET SECURITY COUNTER
+        // =====================================
+
+        await db.query(
+
+            `
+            UPDATE users
+            SET
+                failed_login_attempts = 0,
+                locked_until = NULL
+            WHERE id = ?
+            `,
+
+            [user.id]
+
+        );
 
 
         // =====================================
@@ -811,7 +1124,9 @@ exports.googleLogin = async (req, res) => {
                         google_id,
                         profile_images,
                         auth_provider,
-                        role
+                        role,
+                        failed_login_attempts,
+                        locked_until
                     )
                     VALUES
                     (
@@ -820,7 +1135,9 @@ exports.googleLogin = async (req, res) => {
                         ?,
                         ?,
                         'google',
-                        'user'
+                        'user',
+                        0,
+                        NULL
                     )
                     `,
 
@@ -872,7 +1189,9 @@ exports.googleLogin = async (req, res) => {
                 SET
                     google_id = ?,
                     profile_images = ?,
-                    auth_provider = 'google'
+                    auth_provider = 'google',
+                    failed_login_attempts = 0,
+                    locked_until = NULL
                 WHERE id = ?
                 `,
 
@@ -1005,10 +1324,6 @@ exports.googleLogin = async (req, res) => {
             err
         );
 
-
-        // =====================================
-        // SECURITY LOG
-        // =====================================
 
         await logSecurityEvent({
 
