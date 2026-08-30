@@ -47,6 +47,9 @@
     const supplierRoutes = require("./routes/supplierRoutes");
 
 
+    const adminRoutes = require("./routes/adminRoutes");
+
+
 
 
 
@@ -82,6 +85,7 @@
     // API Routes
     // ================================
     app.use("/api/auth", authRoutes);
+    app.use("/api/admin", adminRoutes);
 
     app.use("/api/receipts", receiptRoutes);
 
