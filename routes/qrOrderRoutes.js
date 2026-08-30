@@ -4,21 +4,33 @@ const router = express.Router();
 
 const qrOrderController = require("../controllers/qrOrderController");
 
-// IMPORTANT:
-// Change this path to your actual business/auth middleware.
-const businessMiddleware = require("../middleware/businessMiddleware");
+
+// ===============================================
+// MIDDLEWARE
+// ===============================================
+
+const authMiddleware =
+    require("../middleware/auth");
+
+const businessMiddleware =
+    require("../middleware/businessMiddleware");
 
 
 // ======================================================
 // PUBLIC CUSTOMER ROUTES
-// NO LOGIN REQUIRED
 // ======================================================
 
-// Customer scans QR
+// IMPORTANT:
+// These routes do NOT require login.
+//
+// Customer scans QR → opens menu
+// Customer does not have JWT.
+
 router.get(
     "/public/:token/menu",
     qrOrderController.getPublicMenu
 );
+
 
 // Customer places order
 router.post(
@@ -30,11 +42,33 @@ router.post(
 // ======================================================
 // OWNER ROUTES
 // ======================================================
+//
+// BOTH middleware are required:
+//
+// 1. authMiddleware
+//      ↓
+//    verifies JWT
+//      ↓
+//    req.user
+//
+// 2. businessMiddleware
+//      ↓
+//    finds owner's business
+//      ↓
+//    req.businessId
+//
+// ======================================================
 
-router.use(businessMiddleware);
+router.use(
+    authMiddleware,
+    businessMiddleware
+);
 
 
+// ======================================================
 // QR
+// ======================================================
+
 router.get(
     "/qr",
     qrOrderController.getOrCreateQR
@@ -46,7 +80,10 @@ router.put(
 );
 
 
+// ======================================================
 // TABLES
+// ======================================================
+
 router.post(
     "/tables",
     qrOrderController.createTable
@@ -68,7 +105,10 @@ router.delete(
 );
 
 
+// ======================================================
 // QR ORDERS
+// ======================================================
+
 router.get(
     "/orders",
     qrOrderController.getQROrders
