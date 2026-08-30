@@ -1,36 +1,36 @@
 const express = require("express");
-
 const router = express.Router();
 
 const reportController = require("../controllers/reportController");
 
-// Summary
-router.get(
-    "/summary",
-    reportController.getReportSummary
-);
+const authMiddleware = require("../middleware/authMiddleware");
+const businessMiddleware = require("../middleware/businessMiddleware");
 
-// Sales
 router.get(
     "/sales",
+    authMiddleware,
+    businessMiddleware,
     reportController.getSalesReport
 );
 
-// Purchases
 router.get(
     "/purchases",
+    authMiddleware,
+    businessMiddleware,
     reportController.getPurchaseReport
 );
 
-// Profit
 router.get(
     "/profit",
+    authMiddleware,
+    businessMiddleware,
     reportController.getProfitReport
 );
 
-// Stock
 router.get(
     "/stock",
+    authMiddleware,
+    businessMiddleware,
     reportController.getStockReport
 );
 
