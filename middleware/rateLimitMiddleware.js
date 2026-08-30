@@ -2,14 +2,14 @@ const rateLimit = require("express-rate-limit");
 
 
 // =====================================
-// GLOBAL API RATE LIMIT
+// LOGIN RATE LIMIT
 // =====================================
 
-const apiRateLimiter = rateLimit({
+const loginRateLimit = rateLimit({
 
-    windowMs: 15 * 60 * 1000,
+    windowMs: 15 * 60 * 1000, // 15 minutes
 
-    max: 300,
+    max: 10, // 10 attempts per IP
 
     standardHeaders: true,
 
@@ -17,10 +17,12 @@ const apiRateLimiter = rateLimit({
 
     message: {
         success: false,
-        message: "Too many requests. Please try again later."
+        message: "Too many login attempts. Please try again later."
     }
 
 });
 
 
-module.exports = apiRateLimiter;
+module.exports = {
+    loginRateLimit
+};
