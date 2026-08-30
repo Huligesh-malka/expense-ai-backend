@@ -104,6 +104,9 @@ app.use(
 // ROUTES
 // =====================================
 
+
+
+
 const authRoutes = require("./routes/authRoutes");
 const receiptRoutes = require("./routes/receiptRoutes");
 const ocrRoutes = require("./routes/ocrRoutes");
@@ -128,6 +131,12 @@ const customerRoutes = require("./routes/customerRoutes");
 const supplierRoutes = require("./routes/supplierRoutes");
 
 const adminRoutes = require("./routes/adminRoutes");
+
+
+
+const adminSecurityRoutes =
+    require("./routes/adminSecurityRoutes");
+
 
 
 // =====================================
@@ -170,6 +179,12 @@ app.use(
 app.use(
     "/api/admin",
     adminRoutes
+);
+
+
+app.use(
+    "/api/admin/security",
+    adminSecurityRoutes
 );
 
 app.use(
