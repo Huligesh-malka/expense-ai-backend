@@ -8,7 +8,7 @@ const firebaseAdmin = require("../config/firebaseAdmin");
 
 const {
     logSecurityEvent
-} = require("../utils/securityLogger");
+} = require("../middleware/securityLogger.js");
 
 
 // =====================================
