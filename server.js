@@ -49,7 +49,7 @@ app.use(
         allowedHeaders: [
             "Content-Type",
             "Authorization"
-        ],
+        ],  
         credentials: false
     })
 );
