@@ -1,4 +1,7 @@
+// controllers/adminController.js
+
 const db = require("../config/db");
+
 
 // =====================================
 // ADMIN DASHBOARD
@@ -8,51 +11,54 @@ exports.getDashboard = async (req, res) => {
 
     try {
 
-        // ==============================
+        // =====================================
         // TOTAL USERS
-        // ==============================
+        // =====================================
 
-        const [users] = await db.query(`
+        const [userRows] = await db.query(`
             SELECT COUNT(*) AS total
             FROM users
         `);
 
 
-        // ==============================
+        // =====================================
         // TOTAL BUSINESSES
-        // ==============================
+        // =====================================
 
-        const [businesses] = await db.query(`
+        const [businessRows] = await db.query(`
             SELECT COUNT(*) AS total
             FROM businesses
         `);
 
 
-        // ==============================
-        // ACTIVE BUSINESSES
-        // ==============================
+        const totalUsers =
+            Number(userRows[0]?.total || 0);
 
-        const [activeBusinesses] = await db.query(`
-            SELECT COUNT(*) AS total
-            FROM businesses
-            WHERE status = 'active'
-        `);
+        const totalBusinesses =
+            Number(businessRows[0]?.total || 0);
 
 
-        // ==============================
-        // INACTIVE BUSINESSES
-        // ==============================
+        // =====================================
+        // IMPORTANT
+        //
+        // Your current businesses table does not
+        // have a status column.
+        //
+        // Therefore, don't query:
+        //
+        // WHERE status = 'active'
+        //
+        // until you add that column.
+        // =====================================
 
-        const [inactiveBusinesses] = await db.query(`
-            SELECT COUNT(*) AS total
-            FROM businesses
-            WHERE status = 'inactive'
-        `);
+        const activeBusinesses = totalBusinesses;
+
+        const inactiveBusinesses = 0;
 
 
-        // ==============================
+        // =====================================
         // RESPONSE
-        // ==============================
+        // =====================================
 
         return res.status(200).json({
 
@@ -61,28 +67,38 @@ exports.getDashboard = async (req, res) => {
             data: {
 
                 users: {
-                    total: Number(users[0].total)
+                    total: totalUsers
                 },
 
                 businesses: {
-                    total: Number(businesses[0].total),
-                    active: Number(activeBusinesses[0].total),
-                    inactive: Number(inactiveBusinesses[0].total)
+                    total: totalBusinesses,
+                    active: activeBusinesses,
+                    inactive: inactiveBusinesses
                 }
 
             }
 
         });
 
-    } catch (err) {
+    }
 
-        console.error("Admin Dashboard Error:", err);
+    catch (err) {
+
+        console.error(
+            "Admin Dashboard Error:",
+            err
+        );
 
         return res.status(500).json({
+
             success: false,
+
             message: "Failed to load admin dashboard"
+
         });
+
     }
+
 };
 
 
@@ -95,19 +111,41 @@ exports.getAllBusinesses = async (req, res) => {
     try {
 
         const [rows] = await db.query(`
+
             SELECT
+
                 b.id,
+
+                b.owner_id,
+
                 b.business_name,
+
                 b.business_type,
-                b.owner_name,
+
                 b.phone,
+
                 b.email,
+
+                b.gst_number,
+
+                b.upi_id,
+
+                b.address,
+
                 b.city,
+
                 b.state,
-                b.status,
+
+                b.pincode,
+
+                b.logo,
+
                 b.created_at,
-                b.updated_at,
+
+                b.owner_name,
+
                 u.full_name AS user_name,
+
                 u.email AS user_email
 
             FROM businesses b
@@ -116,28 +154,60 @@ exports.getAllBusinesses = async (req, res) => {
                 ON u.id = b.owner_id
 
             ORDER BY b.id DESC
+
         `);
 
+
+        // =====================================
+        // ADD FRONTEND-FRIENDLY STATUS
+        // =====================================
+
+        const businesses = rows.map((business) => {
+
+            return {
+
+                ...business,
+
+                status: "active"
+
+            };
+
+        });
+
+
+        // =====================================
+        // RESPONSE
+        // =====================================
 
         return res.status(200).json({
 
             success: true,
 
-            total: rows.length,
+            total: businesses.length,
 
-            data: rows
+            data: businesses
 
         });
 
-    } catch (err) {
+    }
 
-        console.error("Admin Get Businesses Error:", err);
+    catch (err) {
+
+        console.error(
+            "Admin Get Businesses Error:",
+            err
+        );
 
         return res.status(500).json({
+
             success: false,
+
             message: "Failed to load businesses"
+
         });
+
     }
+
 };
 
 
@@ -150,18 +220,35 @@ exports.getAllUsers = async (req, res) => {
     try {
 
         const [rows] = await db.query(`
+
             SELECT
+
                 id,
+
                 full_name,
+
                 email,
+
+                phone,
+
                 role,
-                created_at
+
+                auth_provider,
+
+                created_at,
+
+                updated_at
 
             FROM users
 
             ORDER BY id DESC
+
         `);
 
+
+        // =====================================
+        // RESPONSE
+        // =====================================
 
         return res.status(200).json({
 
@@ -173,13 +260,23 @@ exports.getAllUsers = async (req, res) => {
 
         });
 
-    } catch (err) {
+    }
 
-        console.error("Admin Get Users Error:", err);
+    catch (err) {
+
+        console.error(
+            "Admin Get Users Error:",
+            err
+        );
 
         return res.status(500).json({
+
             success: false,
+
             message: "Failed to load users"
+
         });
+
     }
+
 };
