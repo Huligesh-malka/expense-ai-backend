@@ -10,9 +10,8 @@ const authMiddleware = require("../middleware/auth");
 
 const businessMiddleware = require("../middleware/businessMiddleware");
 
-
 // ============================================================
-// AI BUSINESS ANALYTICS
+// AI BUSINESS ENGINE
 // ============================================================
 
 router.get(
@@ -21,6 +20,5 @@ router.get(
     businessMiddleware,
     getBusinessAnalytics
 );
-
 
 module.exports = router;

@@ -2,60 +2,49 @@ const {
     getBusinessAnalytics
 } = require("../services/businessAnalytics");
 
-
 // ============================================================
-// GET AI BUSINESS ANALYTICS
+// AI BUSINESS ANALYTICS CONTROLLER
 // ============================================================
 // GET /api/ai-business/analytics
 //
-// Business ID comes from authentication middleware:
+// Business ID ALWAYS comes from businessMiddleware:
 // req.businessId
 //
-// NEVER take business_id from req.query or req.body.
+// Never accept business_id from frontend.
 // ============================================================
 
 exports.getBusinessAnalytics = async (req, res) => {
-
     try {
 
         const businessId = req.businessId;
 
-
-        // ====================================================
-        // SECURITY CHECK
-        // ====================================================
+        // --------------------------------------------
+        // SECURITY
+        // --------------------------------------------
 
         if (!businessId) {
-
             return res.status(400).json({
                 success: false,
-                message: "Business ID is required"
+                message: "Business information not found"
             });
-
         }
 
+        // --------------------------------------------
+        // GET REAL BUSINESS DATABASE DATA
+        // --------------------------------------------
 
-        // ====================================================
-        // GET BUSINESS ANALYTICS
-        // ====================================================
+        const analytics = await getBusinessAnalytics(
+            Number(businessId)
+        );
 
-        const analytics =
-            await getBusinessAnalytics(businessId);
-
-
-        // ====================================================
-        // SEND RESPONSE
-        // ====================================================
+        // --------------------------------------------
+        // RESPONSE
+        // --------------------------------------------
 
         return res.status(200).json({
-
             success: true,
-
-            message:
-                "Business analytics generated successfully",
-
+            message: "AI business data generated successfully",
             data: analytics
-
         });
 
     } catch (error) {
@@ -65,21 +54,13 @@ exports.getBusinessAnalytics = async (req, res) => {
             error
         );
 
-
         return res.status(500).json({
-
             success: false,
-
-            message:
-                "Failed to generate business analytics",
-
+            message: "Failed to generate AI business data",
             error:
                 process.env.NODE_ENV === "development"
                     ? error.message
                     : undefined
-
         });
-
     }
-
 };
