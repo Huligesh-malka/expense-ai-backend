@@ -112,6 +112,8 @@ const receiptRoutes = require("./routes/receiptRoutes");
 const ocrRoutes = require("./routes/ocrRoutes");
 const aiRoutes = require("./routes/aiRoutes");
 
+const aiBusinessRoutes = require("./routes/aiBusinessRoutes");
+
 const qrOrderRoutes = require("./routes/qrOrderRoutes");
 
 const dashboardRoutes = require("./routes/dashboardRoutes");
@@ -201,6 +203,18 @@ app.use(
     "/api/ai",
     aiRoutes
 );
+
+
+
+
+app.use(
+    "/api/ai-business",
+    aiBusinessRoutes
+);
+
+
+
+
 
 app.use(
     "/api/dashboard",
