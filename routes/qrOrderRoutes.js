@@ -4,58 +4,23 @@ const router = express.Router();
 
 const qrOrderController = require("../controllers/qrOrderController");
 
-
 // ===============================================
 // MIDDLEWARE
 // ===============================================
 
-const authMiddleware =
-    require("../middleware/auth");
-
-const businessMiddleware =
-    require("../middleware/businessMiddleware");
-
+const authMiddleware = require("../middleware/auth");
+const businessMiddleware = require("../middleware/businessMiddleware");
 
 // ======================================================
-// PUBLIC CUSTOMER ROUTES
-// ======================================================
-
-// IMPORTANT:
-// These routes do NOT require login.
-//
-// Customer scans QR → opens menu
-// Customer does not have JWT.
-
-router.get(
-    "/public/:token/menu",
-    qrOrderController.getPublicMenu
-);
-
-
-// Customer places order
-router.post(
-    "/public/order",
-    qrOrderController.createQROrder
-);
-
-
-// ======================================================
-// OWNER ROUTES
+// OWNER AUTHENTICATION
 // ======================================================
 //
-// BOTH middleware are required:
+// These routes require:
+// 1. JWT authentication
+// 2. Business identification
 //
-// 1. authMiddleware
-//      ↓
-//    verifies JWT
-//      ↓
-//    req.user
-//
-// 2. businessMiddleware
-//      ↓
-//    finds owner's business
-//      ↓
-//    req.businessId
+// req.user
+// req.businessId
 //
 // ======================================================
 
@@ -64,70 +29,34 @@ router.use(
     businessMiddleware
 );
 
-
-// ======================================================
-// QR
-// ======================================================
-
-router.get(
-    "/qr",
-    qrOrderController.getOrCreateQR
-);
-
-router.put(
-    "/qr/status",
-    qrOrderController.updateQRStatus
-);
-
-
-// ======================================================
-// TABLES
-// ======================================================
-
-router.post(
-    "/tables",
-    qrOrderController.createTable
-);
-
-router.get(
-    "/tables",
-    qrOrderController.getTables
-);
-
-router.put(
-    "/tables/:id",
-    qrOrderController.updateTable
-);
-
-router.delete(
-    "/tables/:id",
-    qrOrderController.deleteTable
-);
-
-
 // ======================================================
 // QR ORDERS
 // ======================================================
 
+// Get all QR orders for current business
 router.get(
     "/orders",
     qrOrderController.getQROrders
 );
 
+// Get single QR order
 router.get(
     "/orders/:id",
     qrOrderController.getQROrder
 );
 
+// Update QR order status
 router.put(
     "/orders/:id/status",
     qrOrderController.updateQROrderStatus
 );
 
+// Update QR payment
 router.put(
     "/orders/:id/payment",
     qrOrderController.updateQRPayment
 );
 
+// ======================================================
 
 module.exports = router;
