@@ -1,13 +1,49 @@
 const db = require("../config/db");
 const crypto = require("crypto");
 
-// ============================================
+// ============================================================
+// QR ORDERING CONTROLLER
+// ============================================================
+//
+// GENERAL BUSINESS QR ORDERING
+//
+// Customer:
+// Scan QR
+//    ↓
+// View Products
+//    ↓
+// Add to Cart
+//    ↓
+// Place Order
+//    ↓
+// Owner Dashboard
+//    ↓
+// Owner Accepts
+//    ↓
+// Customer Pays Owner Directly
+//    ↓
+// Owner Confirms Payment
+//    ↓
+// Stock Deducted
+//    ↓
+// Sale / Bill
+//
+// IMPORTANT:
+// - No table is required.
+// - QR belongs to the business.
+// - restaurant_tables are NOT used for QR ordering.
+// - Stock is deducted ONLY after payment confirmation.
+// ============================================================
+
+
+// ============================================================
 // HELPERS
-// ============================================
+// ============================================================
 
 const generateToken = () => {
     return crypto.randomBytes(32).toString("hex");
 };
+
 
 const generateOrderNumber = () => {
     const time = Date.now();
@@ -17,13 +53,20 @@ const generateOrderNumber = () => {
 };
 
 
-// ============================================
+const getFrontendUrl = () => {
+    return (process.env.FRONTEND_URL || "")
+        .replace(/\/+$/, "");
+};
+
+
+// ============================================================
 // GET / CREATE BUSINESS QR
 // OWNER ONLY
-// ============================================
+// ============================================================
 
 exports.getOrCreateQR = async (req, res) => {
     try {
+
         const businessId = req.businessId;
 
         if (!businessId) {
@@ -33,86 +76,114 @@ exports.getOrCreateQR = async (req, res) => {
             });
         }
 
+
         let [rows] = await db.query(
-            `SELECT
+            `
+            SELECT
                 id,
                 business_id,
                 qr_token,
                 status,
                 created_at
-             FROM qr_menus
-             WHERE business_id = ?
-             LIMIT 1`,
+            FROM qr_menus
+            WHERE business_id = ?
+            LIMIT 1
+            `,
             [businessId]
         );
+
+
+        // --------------------------------------------------------
+        // CREATE QR IF BUSINESS DOES NOT HAVE ONE
+        // --------------------------------------------------------
 
         if (rows.length === 0) {
 
             const token = generateToken();
 
             await db.query(
-                `INSERT INTO qr_menus
+                `
+                INSERT INTO qr_menus
                 (
                     business_id,
                     qr_token,
                     status
                 )
-                VALUES (?, ?, 'active')`,
+                VALUES (?, ?, 'active')
+                `,
                 [
                     businessId,
                     token
                 ]
             );
 
+
             [rows] = await db.query(
-                `SELECT
+                `
+                SELECT
                     id,
                     business_id,
                     qr_token,
                     status,
                     created_at
-                 FROM qr_menus
-                 WHERE business_id = ?
-                 LIMIT 1`,
+                FROM qr_menus
+                WHERE business_id = ?
+                LIMIT 1
+                `,
                 [businessId]
             );
         }
 
+
         const qr = rows[0];
+
+        const frontendUrl = getFrontendUrl();
+
 
         res.json({
             success: true,
+
             data: {
                 id: qr.id,
                 business_id: qr.business_id,
                 qr_token: qr.qr_token,
                 status: qr.status,
+                created_at: qr.created_at,
 
-                // Change this to your real frontend domain
-                qr_url: `${process.env.FRONTEND_URL}/qr/${qr.qr_token}`
+                qr_url: frontendUrl
+                    ? `${frontendUrl}/qr/${qr.qr_token}`
+                    : null
             }
         });
 
     } catch (err) {
-        console.error("Get/Create QR Error:", err);
+
+        console.error(
+            "Get/Create QR Error:",
+            err
+        );
 
         res.status(500).json({
             success: false,
-            message: err.message || "Failed to create QR"
+            message:
+                err.message ||
+                "Failed to create QR"
         });
     }
 };
 
 
-// ============================================
+// ============================================================
 // UPDATE QR STATUS
 // OWNER ONLY
-// ============================================
+// ============================================================
 
 exports.updateQRStatus = async (req, res) => {
     try {
+
         const businessId = req.businessId;
         const { status } = req.body;
+
 
         if (!businessId) {
             return res.status(400).json({
@@ -121,22 +192,29 @@ exports.updateQRStatus = async (req, res) => {
             });
         }
 
-        if (!["active", "inactive"].includes(status)) {
+
+        if (
+            !["active", "inactive"].includes(status)
+        ) {
             return res.status(400).json({
                 success: false,
                 message: "Invalid QR status"
             });
         }
 
+
         const [result] = await db.query(
-            `UPDATE qr_menus
-             SET status = ?
-             WHERE business_id = ?`,
+            `
+            UPDATE qr_menus
+            SET status = ?
+            WHERE business_id = ?
+            `,
             [
                 status,
                 businessId
             ]
         );
+
 
         if (result.affectedRows === 0) {
             return res.status(404).json({
@@ -145,35 +223,54 @@ exports.updateQRStatus = async (req, res) => {
             });
         }
 
+
         res.json({
             success: true,
-            message: `QR menu ${status}`
+            message: `QR ordering ${status}`
         });
 
     } catch (err) {
-        console.error("Update QR Status Error:", err);
+
+        console.error(
+            "Update QR Status Error:",
+            err
+        );
 
         res.status(500).json({
             success: false,
-            message: err.message
+            message:
+                err.message ||
+                "Failed to update QR status"
         });
     }
 };
 
 
-// ============================================
+// ============================================================
+// LEGACY TABLE FUNCTIONS
+//
+// Kept only so existing routes do not break.
+//
+// QR ORDERING DOES NOT USE THESE FUNCTIONS.
+// ============================================================
+
+
+// ============================================================
 // CREATE TABLE
-// OWNER ONLY
-// ============================================
+// LEGACY
+// ============================================================
 
 exports.createTable = async (req, res) => {
+
     try {
+
         const businessId = req.businessId;
 
         const {
             table_number,
             table_name
         } = req.body;
+
 
         if (!businessId) {
             return res.status(400).json({
@@ -182,6 +279,7 @@ exports.createTable = async (req, res) => {
             });
         }
 
+
         if (!table_number) {
             return res.status(400).json({
                 success: false,
@@ -189,16 +287,20 @@ exports.createTable = async (req, res) => {
             });
         }
 
+
         const [existing] = await db.query(
-            `SELECT id
-             FROM restaurant_tables
-             WHERE business_id = ?
-             AND table_number = ?`,
+            `
+            SELECT id
+            FROM restaurant_tables
+            WHERE business_id = ?
+            AND table_number = ?
+            `,
             [
                 businessId,
                 table_number
             ]
         );
+
 
         if (existing.length > 0) {
             return res.status(400).json({
@@ -207,14 +309,17 @@ exports.createTable = async (req, res) => {
             });
         }
 
+
         const [result] = await db.query(
-            `INSERT INTO restaurant_tables
+            `
+            INSERT INTO restaurant_tables
             (
                 business_id,
                 table_number,
                 table_name
             )
-            VALUES (?, ?, ?)`,
+            VALUES (?, ?, ?)
+            `,
             [
                 businessId,
                 table_number,
@@ -222,16 +327,20 @@ exports.createTable = async (req, res) => {
             ]
         );
 
+
         const [table] = await db.query(
-            `SELECT *
-             FROM restaurant_tables
-             WHERE id = ?
-             AND business_id = ?`,
+            `
+            SELECT *
+            FROM restaurant_tables
+            WHERE id = ?
+            AND business_id = ?
+            `,
             [
                 result.insertId,
                 businessId
             ]
         );
+
 
         res.status(201).json({
             success: true,
@@ -240,7 +349,11 @@ exports.createTable = async (req, res) => {
         });
 
     } catch (err) {
-        console.error("Create Table Error:", err);
+
+        console.error(
+            "Create Table Error:",
+            err
+        );
 
         res.status(500).json({
             success: false,
@@ -250,27 +363,33 @@ exports.createTable = async (req, res) => {
 };
 
 
-// ============================================
-// GET ALL TABLES
-// OWNER ONLY
-// ============================================
+// ============================================================
+// GET TABLES
+// LEGACY
+// ============================================================
 
 exports.getTables = async (req, res) => {
+
     try {
+
         const businessId = req.businessId;
 
+
         const [tables] = await db.query(
-            `SELECT
+            `
+            SELECT
                 id,
                 table_number,
                 table_name,
                 status,
                 created_at
-             FROM restaurant_tables
-             WHERE business_id = ?
-             ORDER BY table_number ASC`,
+            FROM restaurant_tables
+            WHERE business_id = ?
+            ORDER BY table_number ASC
+            `,
             [businessId]
         );
+
 
         res.json({
             success: true,
@@ -279,7 +398,11 @@ exports.getTables = async (req, res) => {
         });
 
     } catch (err) {
-        console.error("Get Tables Error:", err);
+
+        console.error(
+            "Get Tables Error:",
+            err
+        );
 
         res.status(500).json({
             success: false,
@@ -289,13 +412,15 @@ exports.getTables = async (req, res) => {
 };
 
 
-// ============================================
+// ============================================================
 // UPDATE TABLE
-// OWNER ONLY
-// ============================================
+// LEGACY
+// ============================================================
 
 exports.updateTable = async (req, res) => {
+
     try {
+
         const businessId = req.businessId;
         const { id } = req.params;
 
@@ -305,16 +430,20 @@ exports.updateTable = async (req, res) => {
             status
         } = req.body;
 
+
         const [existing] = await db.query(
-            `SELECT *
-             FROM restaurant_tables
-             WHERE id = ?
-             AND business_id = ?`,
+            `
+            SELECT *
+            FROM restaurant_tables
+            WHERE id = ?
+            AND business_id = ?
+            `,
             [
                 id,
                 businessId
             ]
         );
+
 
         if (existing.length === 0) {
             return res.status(404).json({
@@ -323,22 +452,32 @@ exports.updateTable = async (req, res) => {
             });
         }
 
+
         await db.query(
-            `UPDATE restaurant_tables
-             SET
+            `
+            UPDATE restaurant_tables
+            SET
                 table_number = ?,
                 table_name = ?,
                 status = ?
-             WHERE id = ?
-             AND business_id = ?`,
+            WHERE id = ?
+            AND business_id = ?
+            `,
             [
-                table_number || existing[0].table_number,
-                table_name ?? existing[0].table_name,
-                status || existing[0].status,
+                table_number ||
+                    existing[0].table_number,
+
+                table_name ??
+                    existing[0].table_name,
+
+                status ||
+                    existing[0].status,
+
                 id,
                 businessId
             ]
         );
+
 
         res.json({
             success: true,
@@ -346,7 +485,11 @@ exports.updateTable = async (req, res) => {
         });
 
     } catch (err) {
-        console.error("Update Table Error:", err);
+
+        console.error(
+            "Update Table Error:",
+            err
+        );
 
         res.status(500).json({
             success: false,
@@ -356,25 +499,31 @@ exports.updateTable = async (req, res) => {
 };
 
 
-// ============================================
+// ============================================================
 // DELETE TABLE
-// OWNER ONLY
-// ============================================
+// LEGACY
+// ============================================================
 
 exports.deleteTable = async (req, res) => {
+
     try {
+
         const businessId = req.businessId;
         const { id } = req.params;
 
+
         const [result] = await db.query(
-            `DELETE FROM restaurant_tables
-             WHERE id = ?
-             AND business_id = ?`,
+            `
+            DELETE FROM restaurant_tables
+            WHERE id = ?
+            AND business_id = ?
+            `,
             [
                 id,
                 businessId
             ]
         );
+
 
         if (result.affectedRows === 0) {
             return res.status(404).json({
@@ -383,13 +532,18 @@ exports.deleteTable = async (req, res) => {
             });
         }
 
+
         res.json({
             success: true,
             message: "Table deleted successfully"
         });
 
     } catch (err) {
-        console.error("Delete Table Error:", err);
+
+        console.error(
+            "Delete Table Error:",
+            err
+        );
 
         res.status(500).json({
             success: false,
@@ -399,16 +553,28 @@ exports.deleteTable = async (req, res) => {
 };
 
 
-// ============================================
+// ============================================================
 // PUBLIC QR MENU
 //
-// Customer scans QR.
-// NO OWNER LOGIN REQUIRED.
-// ============================================
+// CUSTOMER
+//
+// GET:
+// /qr/:token
+//
+// Customer sees:
+// Business
+// Products
+// Prices
+//
+// NO TABLE
+// ============================================================
 
 exports.getPublicMenu = async (req, res) => {
+
     try {
+
         const { token } = req.params;
+
 
         if (!token) {
             return res.status(400).json({
@@ -417,9 +583,14 @@ exports.getPublicMenu = async (req, res) => {
             });
         }
 
-        // Get QR + business
+
+        // --------------------------------------------------------
+        // GET BUSINESS FROM QR
+        // --------------------------------------------------------
+
         const [qrRows] = await db.query(
-            `SELECT
+            `
+            SELECT
                 q.id,
                 q.business_id,
                 q.qr_token,
@@ -435,43 +606,39 @@ exports.getPublicMenu = async (req, res) => {
                 b.pincode,
                 b.logo
 
-             FROM qr_menus q
+            FROM qr_menus q
 
-             INNER JOIN businesses b
-             ON b.id = q.business_id
+            INNER JOIN businesses b
+                ON b.id = q.business_id
 
-             WHERE q.qr_token = ?
-             AND q.status = 'active'
+            WHERE q.qr_token = ?
+            AND q.status = 'active'
 
-             LIMIT 1`,
+            LIMIT 1
+            `,
             [token]
         );
+
 
         if (qrRows.length === 0) {
             return res.status(404).json({
                 success: false,
-                message: "QR menu not found or inactive"
+                message:
+                    "QR code not found or inactive"
             });
         }
 
+
         const qr = qrRows[0];
 
-        // Get active tables
-        const [tables] = await db.query(
-            `SELECT
-                id,
-                table_number,
-                table_name
-             FROM restaurant_tables
-             WHERE business_id = ?
-             AND status = 'active'
-             ORDER BY table_number ASC`,
-            [qr.business_id]
-        );
 
-        // Get ONLY QR enabled products
+        // --------------------------------------------------------
+        // GET PRODUCTS
+        // --------------------------------------------------------
+
         const [products] = await db.query(
-            `SELECT
+            `
+            SELECT
                 id,
                 category,
                 product_name,
@@ -485,140 +652,184 @@ exports.getPublicMenu = async (req, res) => {
                 image,
                 description,
 
+                stock,
                 status
 
-             FROM products
+            FROM products
 
-             WHERE business_id = ?
-             AND status = 'active'
-             AND qr_enabled = TRUE
+            WHERE business_id = ?
+            AND status = 'active'
+            AND qr_enabled = TRUE
 
-             ORDER BY category ASC, product_name ASC`,
+            ORDER BY
+                category ASC,
+                product_name ASC
+            `,
             [qr.business_id]
         );
 
+
         res.json({
+
             success: true,
 
             business: {
-                id: qr.business_id,
-                business_name: qr.business_name,
-                owner_name: qr.owner_name,
-                phone: qr.business_phone,
-                email: qr.business_email,
-                address: qr.address,
-                city: qr.city,
-                state: qr.state,
-                pincode: qr.pincode,
-                logo: qr.logo
+
+                id:
+                    qr.business_id,
+
+                business_name:
+                    qr.business_name,
+
+                owner_name:
+                    qr.owner_name,
+
+                phone:
+                    qr.business_phone,
+
+                email:
+                    qr.business_email,
+
+                address:
+                    qr.address,
+
+                city:
+                    qr.city,
+
+                state:
+                    qr.state,
+
+                pincode:
+                    qr.pincode,
+
+                logo:
+                    qr.logo
             },
 
-            tables,
 
             products
         });
 
+
     } catch (err) {
-        console.error("Public QR Menu Error:", err);
+
+        console.error(
+            "Public QR Menu Error:",
+            err
+        );
+
 
         res.status(500).json({
             success: false,
-            message: "Failed to load QR menu"
+            message:
+                err.message ||
+                "Failed to load QR menu"
         });
     }
 };
 
 
-// ============================================
+// ============================================================
 // CREATE QR ORDER
 //
 // CUSTOMER PUBLIC API
-// ============================================
+//
+// NO TABLE
+//
+// Request:
+//
+// {
+//   qr_token: "...",
+//   customer_name: "...",
+//   customer_phone: "...",
+//   notes: "...",
+//   items: [
+//      {
+//          product_id: 10,
+//          quantity: 2
+//      }
+//   ]
+// }
+//
+// ============================================================
 
 exports.createQROrder = async (req, res) => {
 
-    const connection = await db.getConnection();
+    const connection =
+        await db.getConnection();
+
 
     try {
 
         await connection.beginTransaction();
 
+
         const {
             qr_token,
-            table_id,
             customer_name,
             customer_phone,
             notes,
             items
         } = req.body;
 
-        // =====================================
+
+        // --------------------------------------------------------
         // VALIDATION
-        // =====================================
+        // --------------------------------------------------------
 
         if (!qr_token) {
-            throw new Error("QR token is required");
-        }
-
-        if (!table_id) {
-            throw new Error("Table is required");
-        }
-
-        if (!Array.isArray(items) || items.length === 0) {
-            throw new Error("Please add at least one product");
+            throw new Error(
+                "QR token is required"
+            );
         }
 
 
-        // =====================================
+        if (
+            !Array.isArray(items) ||
+            items.length === 0
+        ) {
+            throw new Error(
+                "Please add at least one product"
+            );
+        }
+
+
+        // --------------------------------------------------------
         // VERIFY QR
-        // =====================================
+        // --------------------------------------------------------
 
-        const [qrRows] = await connection.query(
-            `SELECT
-                id,
-                business_id
-             FROM qr_menus
-             WHERE qr_token = ?
-             AND status = 'active'
-             LIMIT 1`,
-            [qr_token]
-        );
+        const [qrRows] =
+            await connection.query(
+                `
+                SELECT
+                    id,
+                    business_id
+
+                FROM qr_menus
+
+                WHERE qr_token = ?
+                AND status = 'active'
+
+                LIMIT 1
+                `,
+                [qr_token]
+            );
+
 
         if (qrRows.length === 0) {
-            throw new Error("Invalid or inactive QR code");
-        }
-
-        const businessId = qrRows[0].business_id;
-
-
-        // =====================================
-        // VERIFY TABLE
-        // =====================================
-
-        const [tableRows] = await connection.query(
-            `SELECT
-                id,
-                table_number,
-                table_name
-             FROM restaurant_tables
-             WHERE id = ?
-             AND business_id = ?
-             AND status = 'active'
-             LIMIT 1`,
-            [
-                table_id,
-                businessId
-            ]
-        );
-
-        if (tableRows.length === 0) {
-            throw new Error("Invalid table");
+            throw new Error(
+                "Invalid or inactive QR code"
+            );
         }
 
 
-        // =====================================
+        const businessId =
+            qrRows[0].business_id;
+
+
+        // --------------------------------------------------------
         // CALCULATE ORDER
-        // =====================================
+        // --------------------------------------------------------
 
         let subtotal = 0;
         let taxTotal = 0;
@@ -628,58 +839,85 @@ exports.createQROrder = async (req, res) => {
 
         for (const item of items) {
 
-            const productId = Number(item.product_id);
-            const quantity = Number(item.quantity);
+            const productId =
+                Number(item.product_id);
 
-            if (!productId || quantity <= 0) {
-                throw new Error("Invalid product or quantity");
-            }
-
-
-            // IMPORTANT:
-            // Customer can ONLY order QR-enabled products
-            const [productRows] = await connection.query(
-                `SELECT
-                    id,
-                    product_name,
-                    selling_price,
-                    price_per,
-                    price_unit,
-                    stock,
-                    tax,
-                    status,
-                    qr_enabled
-
-                 FROM products
-
-                 WHERE id = ?
-                 AND business_id = ?
-                 AND status = 'active'
-                 AND qr_enabled = TRUE
-
-                 FOR UPDATE`,
-                [
-                    productId,
-                    businessId
-                ]
-            );
+            const quantity =
+                Number(item.quantity);
 
 
-            if (productRows.length === 0) {
+            if (
+                !productId ||
+                !Number.isFinite(quantity) ||
+                quantity <= 0
+            ) {
                 throw new Error(
-                    `Product ${productId} is not available in QR menu`
+                    "Invalid product or quantity"
                 );
             }
 
 
-            const product = productRows[0];
+            // ----------------------------------------------------
+            // GET PRODUCT FROM DATABASE
+            //
+            // Never trust price from frontend.
+            // ----------------------------------------------------
+
+            const [productRows] =
+                await connection.query(
+                    `
+                    SELECT
+                        id,
+                        product_name,
+                        selling_price,
+                        price_per,
+                        price_unit,
+                        stock,
+                        tax,
+                        status,
+                        qr_enabled
+
+                    FROM products
+
+                    WHERE id = ?
+                    AND business_id = ?
+                    AND status = 'active'
+                    AND qr_enabled = TRUE
+
+                    FOR UPDATE
+                    `,
+                    [
+                        productId,
+                        businessId
+                    ]
+                );
 
 
-            // =================================
+            if (productRows.length === 0) {
+
+                throw new Error(
+                    `Product ${productId} is not available in QR ordering`
+                );
+            }
+
+
+            const product =
+                productRows[0];
+
+
+            // ----------------------------------------------------
             // STOCK CHECK
-            // =================================
+            //
+            // IMPORTANT:
+            // Stock is NOT deducted when customer places order.
+            //
+            // Stock is deducted after owner confirms payment.
+            // ----------------------------------------------------
 
-            if (Number(product.stock) < quantity) {
+            if (
+                Number(product.stock) <
+                quantity
+            ) {
 
                 throw new Error(
                     `${product.product_name} - Only ${product.stock} ${product.price_unit || "pcs"} available`
@@ -687,124 +925,200 @@ exports.createQROrder = async (req, res) => {
             }
 
 
-            // =================================
+            // ----------------------------------------------------
             // PRICE
-            // =================================
+            // ----------------------------------------------------
 
             const pricePerUnit =
-                Number(product.selling_price) /
-                Number(product.price_per || 1);
+                Number(
+                    product.selling_price
+                ) /
+                Number(
+                    product.price_per || 1
+                );
+
 
             const baseTotal =
-                quantity * pricePerUnit;
+                quantity *
+                pricePerUnit;
 
 
-            // =================================
+            // ----------------------------------------------------
             // TAX
-            // =================================
+            // ----------------------------------------------------
 
-            const taxRate = Number(product.tax || 0);
+            const taxRate =
+                Number(product.tax || 0);
+
 
             const taxAmount =
-                baseTotal * (taxRate / 100);
+                baseTotal *
+                (taxRate / 100);
 
 
             const itemTotal =
-                baseTotal + taxAmount;
+                baseTotal +
+                taxAmount;
 
 
             subtotal += baseTotal;
+
             taxTotal += taxAmount;
 
 
             orderItems.push({
-                product_id: product.id,
-                product_name: product.product_name,
+
+                product_id:
+                    product.id,
+
+                product_name:
+                    product.product_name,
 
                 quantity,
-                unit: product.price_unit || "pcs",
 
-                unit_price: Number(pricePerUnit.toFixed(2)),
+                unit:
+                    product.price_unit ||
+                    "pcs",
 
-                tax_rate: taxRate,
-                tax_amount: Number(taxAmount.toFixed(2)),
+                unit_price:
+                    Number(
+                        pricePerUnit.toFixed(2)
+                    ),
 
-                total: Number(itemTotal.toFixed(2)),
+                tax_rate:
+                    taxRate,
 
-                notes: item.notes || null
+                tax_amount:
+                    Number(
+                        taxAmount.toFixed(2)
+                    ),
+
+                total:
+                    Number(
+                        itemTotal.toFixed(2)
+                    ),
+
+                notes:
+                    item.notes || null
             });
         }
 
 
-        subtotal = Number(subtotal.toFixed(2));
-        taxTotal = Number(taxTotal.toFixed(2));
+        subtotal =
+            Number(
+                subtotal.toFixed(2)
+            );
+
+
+        taxTotal =
+            Number(
+                taxTotal.toFixed(2)
+            );
+
 
         const totalAmount =
-            Number((subtotal + taxTotal).toFixed(2));
+            Number(
+                (
+                    subtotal +
+                    taxTotal
+                ).toFixed(2)
+            );
 
 
-        // =====================================
+        // --------------------------------------------------------
         // ORDER NUMBER
-        // =====================================
+        // --------------------------------------------------------
 
-        const orderNo = generateOrderNumber();
+        const orderNo =
+            generateOrderNumber();
 
 
-        // =====================================
+        // --------------------------------------------------------
         // CREATE ORDER
-        // =====================================
+        //
+        // table_id = NULL
+        // --------------------------------------------------------
 
-        const [orderResult] = await connection.query(
-            `INSERT INTO qr_orders
-            (
-                business_id,
-                table_id,
-                order_no,
+        const [orderResult] =
+            await connection.query(
+                `
+                INSERT INTO qr_orders
+                (
+                    business_id,
+                    table_id,
+                    order_no,
 
-                customer_name,
-                customer_phone,
+                    customer_name,
+                    customer_phone,
 
-                subtotal,
-                discount,
-                tax,
-                total_amount,
+                    subtotal,
+                    discount,
+                    tax,
+                    total_amount,
 
-                order_status,
-                payment_status,
+                    order_status,
+                    payment_status,
 
-                stock_deducted,
-                notes
-            )
-            VALUES
-            (?, ?, ?, ?, ?, ?, 0, ?, ?, 'new', 'pending', FALSE, ?)`,
-            [
-                businessId,
-                table_id,
-                orderNo,
+                    stock_deducted,
+                    notes
+                )
 
-                customer_name || null,
-                customer_phone || null,
+                VALUES
+                (
+                    ?,
+                    NULL,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    0,
+                    ?,
+                    ?,
+                    'new',
+                    'pending',
+                    FALSE,
+                    ?
+                )
+                `,
+                [
 
-                subtotal,
-                taxTotal,
-                totalAmount,
+                    businessId,
 
-                notes || null
-            ]
-        );
+                    orderNo,
+
+                    customer_name ||
+                        null,
+
+                    customer_phone ||
+                        null,
+
+                    subtotal,
+
+                    taxTotal,
+
+                    totalAmount,
+
+                    notes ||
+                        null
+                ]
+            );
 
 
-        const orderId = orderResult.insertId;
+        const orderId =
+            orderResult.insertId;
 
 
-        // =====================================
+        // --------------------------------------------------------
         // INSERT ORDER ITEMS
-        // =====================================
+        // --------------------------------------------------------
 
-        for (const item of orderItems) {
+        for (
+            const item of orderItems
+        ) {
 
             await connection.query(
-                `INSERT INTO qr_order_items
+                `
+                INSERT INTO qr_order_items
                 (
                     order_id,
                     product_id,
@@ -821,23 +1135,41 @@ exports.createQROrder = async (req, res) => {
                     total,
                     notes
                 )
+
                 VALUES
-                (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                (
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?,
+                    ?
+                )
+                `,
                 [
+
                     orderId,
 
                     item.product_id,
+
                     item.product_name,
 
                     item.quantity,
+
                     item.unit,
 
                     item.unit_price,
 
                     item.tax_rate,
+
                     item.tax_amount,
 
                     item.total,
+
                     item.notes
                 ]
             );
@@ -847,24 +1179,39 @@ exports.createQROrder = async (req, res) => {
         await connection.commit();
 
 
+        // --------------------------------------------------------
+        // RESPONSE
+        // --------------------------------------------------------
+
         res.status(201).json({
+
             success: true,
 
-            message: "Order placed successfully",
+            message:
+                "Order placed successfully",
 
             data: {
-                order_id: orderId,
-                order_no: orderNo,
 
-                table_id,
-                table_number: tableRows[0].table_number,
+                order_id:
+                    orderId,
 
-                subtotal,
-                tax: taxTotal,
-                total_amount: totalAmount,
+                order_no:
+                    orderNo,
 
-                order_status: "new",
-                payment_status: "pending"
+                subtotal:
+                    subtotal,
+
+                tax:
+                    taxTotal,
+
+                total_amount:
+                    totalAmount,
+
+                order_status:
+                    "new",
+
+                payment_status:
+                    "pending"
             }
         });
 
@@ -873,12 +1220,22 @@ exports.createQROrder = async (req, res) => {
 
         await connection.rollback();
 
-        console.error("Create QR Order Error:", err);
+
+        console.error(
+            "Create QR Order Error:",
+            err
+        );
+
 
         res.status(400).json({
+
             success: false,
-            message: err.message
+
+            message:
+                err.message ||
+                "Failed to place QR order"
         });
+
 
     } finally {
 
@@ -887,43 +1244,60 @@ exports.createQROrder = async (req, res) => {
 };
 
 
-// ============================================
+// ============================================================
 // OWNER - GET QR ORDERS
-// ============================================
+//
+// OWNER DASHBOARD
+//
+// No restaurant/table JOIN.
+// ============================================================
 
 exports.getQROrders = async (req, res) => {
 
     try {
 
-        const businessId = req.businessId;
+        const businessId =
+            req.businessId;
+
+
+        if (!businessId) {
+            return res.status(400).json({
+                success: false,
+                message: "Business not found"
+            });
+        }
+
 
         const {
-            status,
-            table_id
+            status
         } = req.query;
 
 
         let query = `
             SELECT
+
                 q.id,
+
                 q.order_no,
 
                 q.business_id,
-                q.table_id,
-
-                t.table_number,
-                t.table_name,
 
                 q.customer_name,
+
                 q.customer_phone,
 
                 q.subtotal,
+
                 q.discount,
+
                 q.tax,
+
                 q.total_amount,
 
                 q.order_status,
+
                 q.payment_method,
+
                 q.payment_status,
 
                 q.stock_deducted,
@@ -931,350 +1305,395 @@ exports.getQROrders = async (req, res) => {
                 q.notes,
 
                 q.created_at,
+
                 q.updated_at
 
             FROM qr_orders q
 
-            INNER JOIN restaurant_tables t
-            ON t.id = q.table_id
-            AND t.business_id = q.business_id
-
             WHERE q.business_id = ?
         `;
 
-        const params = [businessId];
+
+        const params =
+            [businessId];
 
 
         if (status) {
-            query += ` AND q.order_status = ?`;
+
+            query += `
+                AND q.order_status = ?
+            `;
+
             params.push(status);
         }
 
 
-        if (table_id) {
-            query += ` AND q.table_id = ?`;
-            params.push(table_id);
-        }
-
-
         query += `
-            ORDER BY q.created_at DESC
+            ORDER BY
+                q.created_at DESC
         `;
 
 
-        const [orders] = await db.query(
-            query,
-            params
-        );
-
-
-        // Get items for every order
-        for (const order of orders) {
-
-            const [items] = await db.query(
-                `SELECT
-                    id,
-                    product_id,
-                    product_name,
-
-                    quantity,
-                    unit,
-
-                    unit_price,
-
-                    tax_rate,
-                    tax_amount,
-
-                    total,
-                    notes
-
-                 FROM qr_order_items
-
-                 WHERE order_id = ?
-
-                 ORDER BY id ASC`,
-                [order.id]
+        const [orders] =
+            await db.query(
+                query,
+                params
             );
 
-            order.items = items;
+
+        // --------------------------------------------------------
+        // GET ORDER ITEMS
+        // --------------------------------------------------------
+
+        for (
+            const order of orders
+        ) {
+
+            const [items] =
+                await db.query(
+                    `
+                    SELECT
+
+                        id,
+
+                        product_id,
+
+                        product_name,
+
+                        quantity,
+
+                        unit,
+
+                        unit_price,
+
+                        tax_rate,
+
+                        tax_amount,
+
+                        total,
+
+                        notes
+
+                    FROM qr_order_items
+
+                    WHERE order_id = ?
+
+                    ORDER BY id ASC
+                    `,
+                    [order.id]
+                );
+
+
+            order.items =
+                items;
         }
 
 
         res.json({
+
             success: true,
-            total: orders.length,
-            data: orders
+
+            total:
+                orders.length,
+
+            data:
+                orders
         });
 
 
     } catch (err) {
 
-        console.error("Get QR Orders Error:", err);
+        console.error(
+            "Get QR Orders Error:",
+            err
+        );
+
 
         res.status(500).json({
+
             success: false,
-            message: err.message
+
+            message:
+                err.message ||
+                "Failed to get QR orders"
         });
     }
 };
 
 
-// ============================================
+// ============================================================
 // OWNER - GET SINGLE QR ORDER
-// ============================================
+// ============================================================
 
 exports.getQROrder = async (req, res) => {
 
     try {
 
-        const businessId = req.businessId;
-        const { id } = req.params;
+        const businessId =
+            req.businessId;
+
+        const { id } =
+            req.params;
 
 
-        const [orders] = await db.query(
-            `SELECT
-                q.*,
+        const [orders] =
+            await db.query(
+                `
+                SELECT
+                    q.*
 
-                t.table_number,
-                t.table_name
+                FROM qr_orders q
 
-             FROM qr_orders q
+                WHERE q.id = ?
 
-             INNER JOIN restaurant_tables t
-             ON t.id = q.table_id
+                AND q.business_id = ?
 
-             WHERE q.id = ?
-             AND q.business_id = ?
-
-             LIMIT 1`,
-            [
-                id,
-                businessId
-            ]
-        );
+                LIMIT 1
+                `,
+                [
+                    id,
+                    businessId
+                ]
+            );
 
 
         if (orders.length === 0) {
 
             return res.status(404).json({
+
                 success: false,
-                message: "QR order not found"
+
+                message:
+                    "QR order not found"
             });
         }
 
 
-        const order = orders[0];
+        const order =
+            orders[0];
 
 
-        const [items] = await db.query(
-            `SELECT *
-             FROM qr_order_items
-             WHERE order_id = ?
-             ORDER BY id ASC`,
-            [id]
-        );
+        const [items] =
+            await db.query(
+                `
+                SELECT *
+
+                FROM qr_order_items
+
+                WHERE order_id = ?
+
+                ORDER BY id ASC
+                `,
+                [id]
+            );
 
 
-        order.items = items;
+        order.items =
+            items;
 
 
         res.json({
+
             success: true,
-            data: order
+
+            data:
+                order
         });
 
 
     } catch (err) {
 
-        console.error("Get QR Order Error:", err);
+        console.error(
+            "Get QR Order Error:",
+            err
+        );
+
 
         res.status(500).json({
+
             success: false,
-            message: err.message
+
+            message:
+                err.message ||
+                "Failed to get QR order"
         });
     }
 };
 
 
-// ============================================
+// ============================================================
 // OWNER - UPDATE QR ORDER STATUS
+//
+// STATUS:
 //
 // new
 // accepted
-// preparing
+// processing
 // ready
-// served
 // completed
 // rejected
 // cancelled
-// ============================================
+//
+// IMPORTANT:
+// ACCEPTED DOES NOT DEDUCT STOCK.
+//
+// PAYMENT MUST BE CONFIRMED FIRST.
+// ============================================================
 
-exports.updateQROrderStatus = async (req, res) => {
+exports.updateQROrderStatus = async (
+    req,
+    res
+) => {
 
-    const connection = await db.getConnection();
+    const connection =
+        await db.getConnection();
+
 
     try {
 
         await connection.beginTransaction();
 
 
-        const businessId = req.businessId;
-        const { id } = req.params;
-        const { status } = req.body;
+        const businessId =
+            req.businessId;
+
+        const { id } =
+            req.params;
+
+        const { status } =
+            req.body;
 
 
         const validStatuses = [
+
             "new",
+
             "accepted",
-            "preparing",
+
+            "processing",
+
             "ready",
-            "served",
+
             "completed",
+
             "rejected",
+
             "cancelled"
         ];
 
 
-        if (!validStatuses.includes(status)) {
+        if (
+            !validStatuses.includes(
+                status
+            )
+        ) {
 
             await connection.rollback();
 
+
             return res.status(400).json({
+
                 success: false,
-                message: "Invalid order status"
+
+                message:
+                    "Invalid order status"
             });
         }
 
 
-        // =====================================
+        // --------------------------------------------------------
         // GET ORDER
-        // =====================================
+        // --------------------------------------------------------
 
-        const [orders] = await connection.query(
-            `SELECT *
-             FROM qr_orders
-             WHERE id = ?
-             AND business_id = ?
+        const [orders] =
+            await connection.query(
+                `
+                SELECT *
 
-             FOR UPDATE`,
-            [
-                id,
-                businessId
-            ]
-        );
+                FROM qr_orders
+
+                WHERE id = ?
+
+                AND business_id = ?
+
+                FOR UPDATE
+                `,
+                [
+                    id,
+                    businessId
+                ]
+            );
 
 
         if (orders.length === 0) {
 
             await connection.rollback();
 
+
             return res.status(404).json({
+
                 success: false,
-                message: "QR order not found"
+
+                message:
+                    "QR order not found"
             });
         }
 
 
-        const order = orders[0];
+        const order =
+            orders[0];
 
 
-        // =====================================
-        // GET ITEMS
-        // =====================================
-
-        const [items] = await connection.query(
-            `SELECT *
-             FROM qr_order_items
-             WHERE order_id = ?`,
-            [id]
-        );
-
-
-        // =====================================
-        // ACCEPT ORDER
-        //
-        // Deduct stock ONCE
-        // =====================================
+        // --------------------------------------------------------
+        // COMPLETED ORDER CANNOT BE CHANGED
+        // --------------------------------------------------------
 
         if (
-            status === "accepted" &&
-            !order.stock_deducted
+            order.order_status ===
+                "completed" &&
+            status !==
+                "completed"
         ) {
 
-            for (const item of items) {
-
-                const [productRows] = await connection.query(
-                    `SELECT
-                        id,
-                        product_name,
-                        stock,
-                        status,
-                        qr_enabled
-
-                     FROM products
-
-                     WHERE id = ?
-                     AND business_id = ?
-
-                     FOR UPDATE`,
-                    [
-                        item.product_id,
-                        businessId
-                    ]
-                );
+            throw new Error(
+                "Completed order cannot be changed"
+            );
+        }
 
 
-                if (productRows.length === 0) {
+        // --------------------------------------------------------
+        // ACCEPT ORDER
+        //
+        // Customer now gets permission/instruction
+        // to pay owner.
+        // --------------------------------------------------------
 
-                    throw new Error(
-                        `${item.product_name} no longer exists`
-                    );
-                }
+        if (
+            status === "accepted"
+        ) {
 
+            if (
+                order.order_status !==
+                    "new"
+            ) {
 
-                const product = productRows[0];
-
-
-                if (product.status !== "active") {
-
-                    throw new Error(
-                        `${product.product_name} is inactive`
-                    );
-                }
-
-
-                if (
-                    Number(product.stock) <
-                    Number(item.quantity)
-                ) {
-
-                    throw new Error(
-                        `${product.product_name} - Only ${product.stock} available`
-                    );
-                }
-
-
-                await connection.query(
-                    `UPDATE products
-                     SET stock = stock - ?
-                     WHERE id = ?
-                     AND business_id = ?`,
-                    [
-                        item.quantity,
-                        item.product_id,
-                        businessId
-                    ]
+                throw new Error(
+                    "Only new orders can be accepted"
                 );
             }
 
 
             await connection.query(
-                `UPDATE qr_orders
-                 SET
-                    stock_deducted = TRUE,
+                `
+                UPDATE qr_orders
+
+                SET
                     order_status = 'accepted'
-                 WHERE id = ?
-                 AND business_id = ?`,
+
+                WHERE id = ?
+
+                AND business_id = ?
+                `,
                 [
                     id,
                     businessId
@@ -1286,48 +1705,57 @@ exports.updateQROrderStatus = async (req, res) => {
 
 
             return res.json({
+
                 success: true,
-                message: "Order accepted and stock updated",
-                order_status: "accepted"
+
+                message:
+                    "Order accepted. Customer can now pay.",
+
+                order_status:
+                    "accepted",
+
+                payment_status:
+                    order.payment_status
             });
         }
 
 
-        // =====================================
-        // CANCEL AFTER STOCK DEDUCTED
-        //
-        // Restore stock
-        // =====================================
+        // --------------------------------------------------------
+        // REJECT / CANCEL
+        // --------------------------------------------------------
 
         if (
-            (status === "cancelled" ||
-             status === "rejected") &&
-            order.stock_deducted
+            status === "rejected" ||
+            status === "cancelled"
         ) {
 
-            for (const item of items) {
+            // If stock was already deducted,
+            // do not restore it here.
+            //
+            // Paid orders should be handled through
+            // refund/business logic separately.
 
-                await connection.query(
-                    `UPDATE products
-                     SET stock = stock + ?
-                     WHERE id = ?
-                     AND business_id = ?`,
-                    [
-                        item.quantity,
-                        item.product_id,
-                        businessId
-                    ]
+            if (
+                order.stock_deducted
+            ) {
+
+                throw new Error(
+                    "Stock has already been deducted. Use refund/cancellation flow."
                 );
             }
 
 
             await connection.query(
-                `UPDATE qr_orders
-                 SET
-                    stock_deducted = FALSE,
+                `
+                UPDATE qr_orders
+
+                SET
                     order_status = ?
-                 WHERE id = ?
-                 AND business_id = ?`,
+
+                WHERE id = ?
+
+                AND business_id = ?
+                `,
                 [
                     status,
                     id,
@@ -1340,22 +1768,53 @@ exports.updateQROrderStatus = async (req, res) => {
 
 
             return res.json({
+
                 success: true,
-                message: `Order ${status} and stock restored`,
-                order_status: status
+
+                message:
+                    `Order ${status}`,
+
+                order_status:
+                    status
             });
         }
 
 
-        // =====================================
-        // NORMAL STATUS UPDATE
-        // =====================================
+        // --------------------------------------------------------
+        // PROCESSING / READY / COMPLETED
+        //
+        // Payment must be confirmed first.
+        // --------------------------------------------------------
+
+        if (
+            status === "processing" ||
+            status === "ready" ||
+            status === "completed"
+        ) {
+
+            if (
+                order.payment_status !==
+                    "paid"
+            ) {
+
+                throw new Error(
+                    "Payment must be confirmed before processing the order"
+                );
+            }
+        }
+
 
         await connection.query(
-            `UPDATE qr_orders
-             SET order_status = ?
-             WHERE id = ?
-             AND business_id = ?`,
+            `
+            UPDATE qr_orders
+
+            SET
+                order_status = ?
+
+            WHERE id = ?
+
+            AND business_id = ?
+            `,
             [
                 status,
                 id,
@@ -1368,9 +1827,14 @@ exports.updateQROrderStatus = async (req, res) => {
 
 
         res.json({
+
             success: true,
-            message: "QR order status updated",
-            order_status: status
+
+            message:
+                "QR order status updated",
+
+            order_status:
+                status
         });
 
 
@@ -1378,15 +1842,22 @@ exports.updateQROrderStatus = async (req, res) => {
 
         await connection.rollback();
 
+
         console.error(
             "Update QR Order Status Error:",
             err
         );
 
+
         res.status(400).json({
+
             success: false,
-            message: err.message
+
+            message:
+                err.message ||
+                "Failed to update QR order"
         });
+
 
     } finally {
 
@@ -1395,16 +1866,47 @@ exports.updateQROrderStatus = async (req, res) => {
 };
 
 
-// ============================================
+// ============================================================
 // OWNER - UPDATE PAYMENT
-// ============================================
+//
+// CURRENT PAYMENT FLOW:
+//
+// Owner accepts order
+//        ↓
+// Customer pays owner directly
+//        ↓
+// Owner confirms payment
+//        ↓
+// Stock deducted
+//
+// IMPORTANT:
+// This endpoint is OWNER CONFIRMATION.
+//
+// It does NOT verify a UPI transaction automatically.
+//
+// Later you can integrate payment verification.
+// ============================================================
 
-exports.updateQRPayment = async (req, res) => {
+exports.updateQRPayment = async (
+    req,
+    res
+) => {
+
+    const connection =
+        await db.getConnection();
+
 
     try {
 
-        const businessId = req.businessId;
-        const { id } = req.params;
+        await connection.beginTransaction();
+
+
+        const businessId =
+            req.businessId;
+
+        const { id } =
+            req.params;
+
 
         const {
             payment_method,
@@ -1413,64 +1915,454 @@ exports.updateQRPayment = async (req, res) => {
 
 
         const validPaymentStatuses = [
+
             "pending",
+
             "paid",
+
             "failed"
         ];
 
 
-        if (!validPaymentStatuses.includes(payment_status)) {
+        if (
+            !validPaymentStatuses.includes(
+                payment_status
+            )
+        ) {
+
+            await connection.rollback();
+
 
             return res.status(400).json({
+
                 success: false,
-                message: "Invalid payment status"
+
+                message:
+                    "Invalid payment status"
             });
         }
 
 
-        const [result] = await db.query(
-            `UPDATE qr_orders
+        // --------------------------------------------------------
+        // GET ORDER
+        // --------------------------------------------------------
 
-             SET
-                payment_method = ?,
-                payment_status = ?
+        const [orders] =
+            await connection.query(
+                `
+                SELECT *
 
-             WHERE id = ?
-             AND business_id = ?`,
-            [
-                payment_method || null,
-                payment_status,
-                id,
-                businessId
-            ]
-        );
+                FROM qr_orders
+
+                WHERE id = ?
+
+                AND business_id = ?
+
+                FOR UPDATE
+                `,
+                [
+                    id,
+                    businessId
+                ]
+            );
 
 
-        if (result.affectedRows === 0) {
+        if (orders.length === 0) {
+
+            await connection.rollback();
+
 
             return res.status(404).json({
+
                 success: false,
-                message: "QR order not found"
+
+                message:
+                    "QR order not found"
             });
         }
 
 
-        res.json({
-            success: true,
-            message: "Payment updated successfully"
-        });
+        const order =
+            orders[0];
+
+
+        // --------------------------------------------------------
+        // PAYMENT PENDING
+        // --------------------------------------------------------
+
+        if (
+            payment_status ===
+                "pending"
+        ) {
+
+            await connection.query(
+                `
+                UPDATE qr_orders
+
+                SET
+
+                    payment_method = ?,
+
+                    payment_status = 'pending'
+
+                WHERE id = ?
+
+                AND business_id = ?
+                `,
+                [
+                    payment_method ||
+                        null,
+
+                    id,
+
+                    businessId
+                ]
+            );
+
+
+            await connection.commit();
+
+
+            return res.json({
+
+                success: true,
+
+                message:
+                    "Payment set to pending",
+
+                payment_status:
+                    "pending"
+            });
+        }
+
+
+        // --------------------------------------------------------
+        // PAYMENT FAILED
+        // --------------------------------------------------------
+
+        if (
+            payment_status ===
+                "failed"
+        ) {
+
+            await connection.query(
+                `
+                UPDATE qr_orders
+
+                SET
+
+                    payment_method = ?,
+
+                    payment_status = 'failed'
+
+                WHERE id = ?
+
+                AND business_id = ?
+                `,
+                [
+                    payment_method ||
+                        null,
+
+                    id,
+
+                    businessId
+                ]
+            );
+
+
+            await connection.commit();
+
+
+            return res.json({
+
+                success: true,
+
+                message:
+                    "Payment marked as failed",
+
+                payment_status:
+                    "failed"
+            });
+        }
+
+
+        // --------------------------------------------------------
+        // PAYMENT PAID
+        // --------------------------------------------------------
+
+        if (
+            payment_status ===
+                "paid"
+        ) {
+
+            // ----------------------------------------------------
+            // OWNER MUST ACCEPT FIRST
+            // ----------------------------------------------------
+
+            if (
+                order.order_status !==
+                    "accepted"
+            ) {
+
+                throw new Error(
+                    "Owner must accept the order before payment confirmation"
+                );
+            }
+
+
+            // ----------------------------------------------------
+            // ALREADY PAID
+            // ----------------------------------------------------
+
+            if (
+                order.payment_status ===
+                    "paid"
+            ) {
+
+                await connection.commit();
+
+
+                return res.json({
+
+                    success: true,
+
+                    message:
+                        "Payment is already confirmed",
+
+                    payment_status:
+                        "paid",
+
+                    stock_deducted:
+                        Boolean(
+                            order.stock_deducted
+                        )
+                });
+            }
+
+
+            // ----------------------------------------------------
+            // GET ORDER ITEMS
+            // ----------------------------------------------------
+
+            const [items] =
+                await connection.query(
+                    `
+                    SELECT
+
+                        product_id,
+
+                        product_name,
+
+                        quantity
+
+                    FROM qr_order_items
+
+                    WHERE order_id = ?
+                    `,
+                    [id]
+                );
+
+
+            if (
+                items.length === 0
+            ) {
+
+                throw new Error(
+                    "Order has no items"
+                );
+            }
+
+
+            // ----------------------------------------------------
+            // DEDUCT STOCK ONLY ON PAYMENT
+            // ----------------------------------------------------
+
+            if (
+                !order.stock_deducted
+            ) {
+
+                for (
+                    const item of items
+                ) {
+
+                    const [
+                        productRows
+                    ] =
+                        await connection.query(
+                            `
+                            SELECT
+
+                                id,
+
+                                product_name,
+
+                                stock,
+
+                                status
+
+                            FROM products
+
+                            WHERE id = ?
+
+                            AND business_id = ?
+
+                            FOR UPDATE
+                            `,
+                            [
+                                item.product_id,
+
+                                businessId
+                            ]
+                        );
+
+
+                    if (
+                        productRows.length ===
+                        0
+                    ) {
+
+                        throw new Error(
+                            `${item.product_name} no longer exists`
+                        );
+                    }
+
+
+                    const product =
+                        productRows[0];
+
+
+                    if (
+                        product.status !==
+                            "active"
+                    ) {
+
+                        throw new Error(
+                            `${product.product_name} is inactive`
+                        );
+                    }
+
+
+                    if (
+                        Number(
+                            product.stock
+                        ) <
+                        Number(
+                            item.quantity
+                        )
+                    ) {
+
+                        throw new Error(
+                            `${product.product_name} - Only ${product.stock} available`
+                        );
+                    }
+
+
+                    await connection.query(
+                        `
+                        UPDATE products
+
+                        SET
+                            stock =
+                            stock - ?
+
+                        WHERE id = ?
+
+                        AND business_id = ?
+                        `,
+                        [
+                            item.quantity,
+
+                            item.product_id,
+
+                            businessId
+                        ]
+                    );
+                }
+            }
+
+
+            // ----------------------------------------------------
+            // MARK PAYMENT PAID
+            // ----------------------------------------------------
+
+            await connection.query(
+                `
+                UPDATE qr_orders
+
+                SET
+
+                    payment_method = ?,
+
+                    payment_status = 'paid',
+
+                    stock_deducted = TRUE
+
+                WHERE id = ?
+
+                AND business_id = ?
+                `,
+                [
+                    payment_method ||
+                        "UPI",
+
+                    id,
+
+                    businessId
+                ]
+            );
+
+
+            await connection.commit();
+
+
+            return res.json({
+
+                success: true,
+
+                message:
+                    "Payment confirmed and stock updated",
+
+                payment_status:
+                    "paid",
+
+                stock_deducted:
+                    true,
+
+                order_id:
+                    order.id,
+
+                order_no:
+                    order.order_no,
+
+                total_amount:
+                    order.total_amount
+            });
+        }
 
 
     } catch (err) {
+
+        await connection.rollback();
+
 
         console.error(
             "Update QR Payment Error:",
             err
         );
 
-        res.status(500).json({
+
+        res.status(400).json({
+
             success: false,
-            message: err.message
+
+            message:
+                err.message ||
+                "Failed to update payment"
         });
+
+
+    } finally {
+
+        connection.release();
     }
 };
