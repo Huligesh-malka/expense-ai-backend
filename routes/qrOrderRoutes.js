@@ -2,8 +2,12 @@ const express = require("express");
 
 const router = express.Router();
 
-const qrOrderController =
-    require("../controllers/qrOrderController");
+const qrOrderController = require("../controllers/qrOrderController");
+
+
+// ===============================================
+// MIDDLEWARE
+// ===============================================
 
 const authMiddleware =
     require("../middleware/auth");
@@ -16,11 +20,17 @@ const businessMiddleware =
 // PUBLIC CUSTOMER ROUTES
 // ======================================================
 
-// Customer scans QR
+// IMPORTANT:
+// These routes do NOT require login.
+//
+// Customer scans QR → opens menu
+// Customer does not have JWT.
+
 router.get(
     "/public/:token/menu",
     qrOrderController.getPublicMenu
 );
+
 
 // Customer places order
 router.post(
@@ -30,7 +40,23 @@ router.post(
 
 
 // ======================================================
-// OWNER AUTHENTICATION
+// OWNER ROUTES
+// ======================================================
+//
+// BOTH middleware are required:
+//
+// 1. authMiddleware
+//      ↓
+//    verifies JWT
+//      ↓
+//    req.user
+//
+// 2. businessMiddleware
+//      ↓
+//    finds owner's business
+//      ↓
+//    req.businessId
+//
 // ======================================================
 
 router.use(
@@ -80,7 +106,7 @@ router.delete(
 
 
 // ======================================================
-// ORDERS
+// QR ORDERS
 // ======================================================
 
 router.get(
