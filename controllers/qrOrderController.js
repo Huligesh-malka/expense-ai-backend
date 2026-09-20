@@ -659,7 +659,6 @@ exports.getPublicMenu = async (req, res) => {
 
             WHERE business_id = ?
             AND status = 'active'
-            AND qr_enabled = TRUE
 
             ORDER BY
                 category ASC,
@@ -882,7 +881,7 @@ exports.createQROrder = async (req, res) => {
                     WHERE id = ?
                     AND business_id = ?
                     AND status = 'active'
-                    AND qr_enabled = TRUE
+                    
 
                     FOR UPDATE
                     `,
