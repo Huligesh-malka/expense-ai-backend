@@ -1,13 +1,16 @@
+
 const db = require("../config/db");
 
-// ===============================
-// Create Business
-// ===============================
+
+// CREATE BUSINESS
+// ======================================================
 exports.createBusiness = async (req, res) => {
     try {
-        // IMPORTANT: Use req.user.id instead of trusting client input
+        // IMPORTANT:
+        // Always use the authenticated user's ID.
+        // Do not trust owner_id coming from the frontend.
         const ownerId = req.user.id;
-        
+
         const {
             business_name,
             business_type,
@@ -23,7 +26,9 @@ exports.createBusiness = async (req, res) => {
             logo
         } = req.body;
 
+        // --------------------------------------------------
         // Validate required fields
+        // --------------------------------------------------
         if (!business_name || !business_type) {
             return res.status(400).json({
                 success: false,
@@ -31,7 +36,9 @@ exports.createBusiness = async (req, res) => {
             });
         }
 
-        // Check if business already exists for this owner
+        // --------------------------------------------------
+        // Check if owner already has a business
+        // --------------------------------------------------
         const [existing] = await db.query(
             "SELECT id FROM businesses WHERE owner_id = ?",
             [ownerId]
@@ -44,7 +51,16 @@ exports.createBusiness = async (req, res) => {
             });
         }
 
-        // Insert new business
+        // --------------------------------------------------
+        // Create business
+        //
+        // IMPORTANT:
+        // Your businesses table does NOT have:
+        // - status
+        // - updated_at
+        //
+        // Therefore they must NOT be included here.
+        // --------------------------------------------------
         const [result] = await db.query(
             `INSERT INTO businesses (
                 owner_id,
@@ -60,7 +76,7 @@ exports.createBusiness = async (req, res) => {
                 state,
                 pincode,
                 logo
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 ownerId,
                 business_name,
@@ -78,13 +94,15 @@ exports.createBusiness = async (req, res) => {
             ]
         );
 
-        // Fetch the created business
+        // --------------------------------------------------
+        // Fetch created business
+        // --------------------------------------------------
         const [newBusiness] = await db.query(
             "SELECT * FROM businesses WHERE id = ?",
             [result.insertId]
         );
 
-        res.status(201).json({
+        return res.status(201).json({
             success: true,
             message: "Business Created Successfully",
             business: newBusiness[0]
@@ -92,33 +110,34 @@ exports.createBusiness = async (req, res) => {
 
     } catch (err) {
         console.error("Create Business Error:", err);
-        
-        // Handle unique constraint violation
-        if (err.code === 'ER_DUP_ENTRY') {
+
+        // Duplicate owner_id
+        if (err.code === "ER_DUP_ENTRY") {
             return res.status(409).json({
                 success: false,
                 message: "You already have a business registered."
             });
         }
 
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
             message: err.message
         });
     }
 };
 
-// ===============================
-// Get My Business (Protected)
-// ===============================
+
+// ======================================================
+// GET MY BUSINESS
+// ======================================================
 exports.getMyBusiness = async (req, res) => {
     try {
-        // req.businessId is set by businessMiddleware
         const businessId = req.businessId;
 
         const [business] = await db.query(
-            `SELECT 
+            `SELECT
                 id,
+                owner_id,
                 business_name,
                 business_type,
                 owner_name,
@@ -131,10 +150,12 @@ exports.getMyBusiness = async (req, res) => {
                 state,
                 pincode,
                 logo,
-                status,
                 created_at,
-                updated_at
-            FROM businesses 
+                trial_start_date,
+                expiry_date,
+                plan,
+                is_trial
+            FROM businesses
             WHERE id = ?`,
             [businessId]
         );
@@ -146,27 +167,29 @@ exports.getMyBusiness = async (req, res) => {
             });
         }
 
-        res.json({
+        return res.json({
             success: true,
             data: business[0]
         });
 
     } catch (err) {
         console.error("Get Business Error:", err);
-        res.status(500).json({
+
+        return res.status(500).json({
             success: false,
             message: err.message
         });
     }
 };
 
-// ===============================
-// Update My Business (Protected)
-// ===============================
+
+// ======================================================
+// UPDATE MY BUSINESS
+// ======================================================
 exports.updateMyBusiness = async (req, res) => {
     try {
         const businessId = req.businessId;
-        
+
         const {
             business_name,
             business_type,
@@ -182,59 +205,76 @@ exports.updateMyBusiness = async (req, res) => {
             logo
         } = req.body;
 
-        // Build update query dynamically
         const updates = [];
         const values = [];
+
+        // --------------------------------------------------
+        // Dynamic update fields
+        // --------------------------------------------------
 
         if (business_name !== undefined) {
             updates.push("business_name = ?");
             values.push(business_name);
         }
+
         if (business_type !== undefined) {
             updates.push("business_type = ?");
             values.push(business_type);
         }
+
         if (owner_name !== undefined) {
             updates.push("owner_name = ?");
             values.push(owner_name);
         }
+
         if (phone !== undefined) {
             updates.push("phone = ?");
             values.push(phone);
         }
+
         if (email !== undefined) {
             updates.push("email = ?");
             values.push(email);
         }
+
         if (gst_number !== undefined) {
             updates.push("gst_number = ?");
             values.push(gst_number);
         }
+
         if (upi_id !== undefined) {
             updates.push("upi_id = ?");
             values.push(upi_id);
         }
+
         if (address !== undefined) {
             updates.push("address = ?");
             values.push(address);
         }
+
         if (city !== undefined) {
             updates.push("city = ?");
             values.push(city);
         }
+
         if (state !== undefined) {
             updates.push("state = ?");
             values.push(state);
         }
+
         if (pincode !== undefined) {
             updates.push("pincode = ?");
             values.push(pincode);
         }
+
         if (logo !== undefined) {
             updates.push("logo = ?");
             values.push(logo);
         }
 
+        // --------------------------------------------------
+        // Nothing to update
+        // --------------------------------------------------
         if (updates.length === 0) {
             return res.status(400).json({
                 success: false,
@@ -242,21 +282,25 @@ exports.updateMyBusiness = async (req, res) => {
             });
         }
 
-        // Add updated_at timestamp
-        updates.push("updated_at = CURRENT_TIMESTAMP");
         values.push(businessId);
 
-        const query = `UPDATE businesses SET ${updates.join(", ")} WHERE id = ?`;
-        
+        const query = `
+            UPDATE businesses
+            SET ${updates.join(", ")}
+            WHERE id = ?
+        `;
+
         await db.query(query, values);
 
+        // --------------------------------------------------
         // Fetch updated business
+        // --------------------------------------------------
         const [updatedBusiness] = await db.query(
             "SELECT * FROM businesses WHERE id = ?",
             [businessId]
         );
 
-        res.json({
+        return res.json({
             success: true,
             message: "Business Updated Successfully",
             business: updatedBusiness[0]
@@ -264,25 +308,27 @@ exports.updateMyBusiness = async (req, res) => {
 
     } catch (err) {
         console.error("Update Business Error:", err);
-        res.status(500).json({
+
+        return res.status(500).json({
             success: false,
             message: err.message
         });
     }
 };
 
-// ===============================
-// Get My Business Profile (Protected)
-// ===============================
+
+// ======================================================
+// GET MY BUSINESS PROFILE
+// ======================================================
 exports.getMyBusinessProfile = async (req, res) => {
     try {
         const businessId = req.businessId;
 
         const [business] = await db.query(
-            `SELECT 
+            `SELECT
                 b.*,
-                u.full_name as owner_name,
-                u.email as owner_email
+                u.full_name AS user_owner_name,
+                u.email AS owner_email
             FROM businesses b
             INNER JOIN users u ON u.id = b.owner_id
             WHERE b.id = ?`,
@@ -296,27 +342,29 @@ exports.getMyBusinessProfile = async (req, res) => {
             });
         }
 
-        res.json({
+        return res.json({
             success: true,
             business: business[0]
         });
 
     } catch (err) {
         console.error("Get Business Profile Error:", err);
-        res.status(500).json({
+
+        return res.status(500).json({
             success: false,
             message: err.message
         });
     }
 };
 
-// ===============================
-// Update My Business Profile (Protected)
-// ===============================
+
+// ======================================================
+// UPDATE MY BUSINESS PROFILE
+// ======================================================
 exports.updateMyBusinessProfile = async (req, res) => {
     try {
         const businessId = req.businessId;
-        
+
         const {
             business_name,
             business_type,
@@ -332,7 +380,9 @@ exports.updateMyBusinessProfile = async (req, res) => {
             logo
         } = req.body;
 
+        // --------------------------------------------------
         // Validate required fields
+        // --------------------------------------------------
         if (!business_name || !business_type) {
             return res.status(400).json({
                 success: false,
@@ -340,6 +390,9 @@ exports.updateMyBusinessProfile = async (req, res) => {
             });
         }
 
+        // --------------------------------------------------
+        // Update business
+        // --------------------------------------------------
         await db.query(
             `UPDATE businesses SET
                 business_name = ?,
@@ -353,8 +406,7 @@ exports.updateMyBusinessProfile = async (req, res) => {
                 city = ?,
                 state = ?,
                 pincode = ?,
-                logo = ?,
-                updated_at = CURRENT_TIMESTAMP
+                logo = ?
             WHERE id = ?`,
             [
                 business_name,
@@ -373,12 +425,15 @@ exports.updateMyBusinessProfile = async (req, res) => {
             ]
         );
 
+        // --------------------------------------------------
+        // Fetch updated business
+        // --------------------------------------------------
         const [updatedBusiness] = await db.query(
             "SELECT * FROM businesses WHERE id = ?",
             [businessId]
         );
 
-        res.json({
+        return res.json({
             success: true,
             message: "Business Profile Updated Successfully",
             business: updatedBusiness[0]
@@ -386,22 +441,32 @@ exports.updateMyBusinessProfile = async (req, res) => {
 
     } catch (err) {
         console.error("Update Business Profile Error:", err);
-        res.status(500).json({
+
+        return res.status(500).json({
             success: false,
             message: err.message
         });
     }
 };
 
-// ===============================
-// Deactivate Business (Soft Delete)
-// ===============================
+
+// ======================================================
+// DEACTIVATE BUSINESS
+// ======================================================
+//
+// Your database does not have a `status` column.
+//
+// We use `is_trial = 0` here to represent disabled access.
+// IMPORTANT: If your application uses is_trial specifically
+// for subscription/trial logic, you may want a separate
+// `is_active` column instead.
+// ======================================================
 exports.deactivateBusiness = async (req, res) => {
     try {
         const businessId = req.businessId;
 
         const [business] = await db.query(
-            "SELECT status FROM businesses WHERE id = ?",
+            "SELECT id, is_trial FROM businesses WHERE id = ?",
             [businessId]
         );
 
@@ -412,7 +477,8 @@ exports.deactivateBusiness = async (req, res) => {
             });
         }
 
-        if (business[0].status === 'inactive') {
+        // Already disabled
+        if (business[0].is_trial === 0) {
             return res.status(400).json({
                 success: false,
                 message: "Business is already deactivated"
@@ -420,33 +486,35 @@ exports.deactivateBusiness = async (req, res) => {
         }
 
         await db.query(
-            "UPDATE businesses SET status = 'inactive', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE businesses SET is_trial = 0 WHERE id = ?",
             [businessId]
         );
 
-        res.json({
+        return res.json({
             success: true,
             message: "Business deactivated successfully"
         });
 
     } catch (err) {
         console.error("Deactivate Business Error:", err);
-        res.status(500).json({
+
+        return res.status(500).json({
             success: false,
             message: err.message
         });
     }
 };
 
-// ===============================
-// Reactivate Business
-// ===============================
+
+// ======================================================
+// REACTIVATE BUSINESS
+// ======================================================
 exports.reactivateBusiness = async (req, res) => {
     try {
         const businessId = req.businessId;
 
         const [business] = await db.query(
-            "SELECT status FROM businesses WHERE id = ?",
+            "SELECT id, is_trial FROM businesses WHERE id = ?",
             [businessId]
         );
 
@@ -457,7 +525,7 @@ exports.reactivateBusiness = async (req, res) => {
             });
         }
 
-        if (business[0].status === 'active') {
+        if (business[0].is_trial === 1) {
             return res.status(400).json({
                 success: false,
                 message: "Business is already active"
@@ -465,57 +533,71 @@ exports.reactivateBusiness = async (req, res) => {
         }
 
         await db.query(
-            "UPDATE businesses SET status = 'active', updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            "UPDATE businesses SET is_trial = 1 WHERE id = ?",
             [businessId]
         );
 
-        res.json({
+        return res.json({
             success: true,
             message: "Business reactivated successfully"
         });
 
     } catch (err) {
         console.error("Reactivate Business Error:", err);
-        res.status(500).json({
+
+        return res.status(500).json({
             success: false,
             message: err.message
         });
     }
 };
 
-// ===============================
-// ADMIN ONLY: Get All Businesses
-// ===============================
+
+// ======================================================
+// ADMIN ONLY: GET ALL BUSINESSES
+// ======================================================
 exports.getAllBusinesses = async (req, res) => {
     try {
-        // TODO: Add admin role check middleware
-        // if (!req.user.isAdmin) {
-        //     return res.status(403).json({
-        //         success: false,
-        //         message: "Admin access required"
-        //     });
-        // }
+        // TODO:
+        // Add admin middleware to the route.
+        //
+        // Example:
+        // router.get(
+        //     "/admin/businesses",
+        //     authMiddleware,
+        //     adminMiddleware,
+        //     businessController.getAllBusinesses
+        // );
 
         const [rows] = await db.query(
-            `SELECT 
+            `SELECT
                 b.id,
+                b.owner_id,
                 b.business_name,
                 b.business_type,
                 b.owner_name,
                 b.phone,
                 b.email,
+                b.gst_number,
+                b.upi_id,
+                b.address,
                 b.city,
                 b.state,
-                b.status,
+                b.pincode,
+                b.logo,
                 b.created_at,
-                u.full_name as owner_name,
-                u.email as owner_email
+                b.trial_start_date,
+                b.expiry_date,
+                b.plan,
+                b.is_trial,
+                u.full_name AS user_owner_name,
+                u.email AS owner_email
             FROM businesses b
             INNER JOIN users u ON u.id = b.owner_id
             ORDER BY b.id DESC`
         );
 
-        res.json({
+        return res.json({
             success: true,
             total: rows.length,
             data: rows
@@ -523,7 +605,8 @@ exports.getAllBusinesses = async (req, res) => {
 
     } catch (err) {
         console.error("Get All Businesses Error:", err);
-        res.status(500).json({
+
+        return res.status(500).json({
             success: false,
             message: err.message
         });
