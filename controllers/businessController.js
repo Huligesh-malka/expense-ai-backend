@@ -59,8 +59,7 @@ exports.createBusiness = async (req, res) => {
                 city,
                 state,
                 pincode,
-                logo,
-                status
+                logo
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')`,
             [
                 ownerId,
