@@ -9,23 +9,33 @@ const db = require("../config/db");
  */
 const convertUnit = (quantity, fromUnit, toUnit) => {
     if (fromUnit === toUnit) return quantity;
-    let quantityInBase = quantity;
-    if (fromUnit === 'kg') {
-        quantityInBase = quantity * 1000;
-    } else if (fromUnit === 'l') {
-        quantityInBase = quantity * 1000;
-    } else if (fromUnit === 'dozen') {
-        quantityInBase = quantity * 12;
-    }
-    let result = quantityInBase;
-    if (toUnit === 'kg') {
-        result = quantityInBase / 1000;
-    } else if (toUnit === 'l') {
-        result = quantityInBase / 1000;
-    } else if (toUnit === 'dozen') {
-        result = quantityInBase / 12;
-    }
-    return result;
+
+    // Convert compatible units to a common base unit, then to the target unit.
+    const toBase = {
+        g: 1,
+        kg: 1000,
+        ml: 1,
+        l: 1000,
+        pcs: 1,
+        dozen: 12,
+        meter: 1,
+        feet: 0.3048
+    };
+
+    const compatibleFamilies = [
+        new Set(["g", "kg"]),
+        new Set(["ml", "l"]),
+        new Set(["pcs", "dozen"]),
+        new Set(["meter", "feet"])
+    ];
+
+    const compatible = compatibleFamilies.some(
+        family => family.has(fromUnit) && family.has(toUnit)
+    );
+
+    if (!compatible) return quantity;
+
+    return (quantity * toBase[fromUnit]) / toBase[toUnit];
 };
 
 /**
@@ -45,10 +55,20 @@ const calculatePrice = (product, quantity, enteredUnit) => {
 // =====================================
 
 exports.createSale = async (req, res) => {
-    const conn = await db.getConnection();
+    let conn;
 
     try {
+        conn = await db.getConnection();
         await conn.beginTransaction();
+
+        const businessId = Number(req.businessId);
+        if (!Number.isInteger(businessId) || businessId <= 0) {
+            await conn.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Business not found"
+            });
+        }
 
         const {
             customer_id,
@@ -61,22 +81,7 @@ exports.createSale = async (req, res) => {
             items
         } = req.body;
 
-        // =====================================
-        // IMPORTANT: Get businessId from middleware
-        // DO NOT trust business_id from frontend
-        // =====================================
-        const businessId = req.businessId;
-
-        if (!businessId) {
-            await conn.rollback();
-            return res.status(400).json({
-                success: false,
-                message: "Business not found"
-            });
-        }
-
-        // Validation: Items
-        if (!items || items.length === 0) {
+        if (!Array.isArray(items) || items.length === 0) {
             await conn.rollback();
             return res.status(400).json({
                 success: false,
@@ -84,97 +89,208 @@ exports.createSale = async (req, res) => {
             });
         }
 
-        const validUnits = [
-            "pcs", "g", "kg", "ml", "l",
-            "pack", "box", "bottle",
-            "dozen", "meter", "feet"
-        ];
+        const discountPercent = Number(discount);
+        const gstPercent = Number(gst);
+        if (
+            !Number.isFinite(discountPercent) ||
+            discountPercent < 0 ||
+            discountPercent > 100 ||
+            !Number.isFinite(gstPercent) ||
+            gstPercent < 0 ||
+            gstPercent > 100
+        ) {
+            await conn.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Discount and GST must be valid percentages between 0 and 100."
+            });
+        }
 
+        const validUnits = new Set([
+            "pcs", "g", "kg", "ml", "l", "pack", "box",
+            "bottle", "dozen", "meter", "feet"
+        ]);
+
+        // DSA: Set removes duplicate product IDs; Map provides average O(1) product lookups.
+        const productIds = [...new Set(items.map(item => Number(item.product_id)))];
+
+        if (
+            productIds.some(id => !Number.isInteger(id) || id <= 0) ||
+            items.some(item => !Number.isFinite(Number(item.quantity)) || Number(item.quantity) <= 0)
+        ) {
+            await conn.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Each item must have a valid product ID and quantity greater than zero."
+            });
+        }
+
+        // Fetch all products in one query and lock rows until the transaction completes.
+        const placeholders = productIds.map(() => "?").join(",");
+        const [productRows] = await conn.query(
+            `SELECT *
+             FROM products
+             WHERE business_id = ?
+               AND id IN (${placeholders})
+             FOR UPDATE`,
+            [businessId, ...productIds]
+        );
+
+        const productMap = new Map(
+            productRows.map(product => [Number(product.id), product])
+        );
+
+        if (productMap.size !== productIds.length) {
+            await conn.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "One or more products were not found in this business."
+            });
+        }
+
+        // Validate and price all lines before inserting the invoice.
+        const preparedItems = [];
+        const requiredStockByProduct = new Map();
         let subtotal = 0;
 
-        // FIRST LOOP: Validate items and calculate subtotal
         for (const item of items) {
-            if (Number(item.quantity) <= 0) {
-                throw new Error("Quantity must be greater than 0");
-            }
-
+            const productId = Number(item.product_id);
+            const product = productMap.get(productId);
+            const quantity = Number(item.quantity);
             const enteredUnit = item.entered_unit || "pcs";
-            if (!validUnits.includes(enteredUnit)) {
+            const productUnit = product.price_unit || "pcs";
+
+            if (!validUnits.has(enteredUnit)) {
                 throw new Error(`Invalid unit: ${enteredUnit}`);
             }
 
-            // SECURITY: Check product belongs to this business
-            const [product] = await conn.query(
-                "SELECT * FROM products WHERE id = ? AND business_id = ?",
-                [item.product_id, businessId]
-            );
-
-            if (product.length === 0) {
-                throw new Error(`Product with ID ${item.product_id} not found in this business`);
+            if (product.status !== "active") {
+                throw new Error(`${product.product_name} is inactive and cannot be sold.`);
             }
 
-            if (product[0].status !== "active") {
+            // Unit conversion is only valid within compatible measurement families.
+            const weightUnits = new Set(["g", "kg"]);
+            const volumeUnits = new Set(["ml", "l"]);
+            const countUnits = new Set(["pcs", "dozen"]);
+            const lengthUnits = new Set(["meter", "feet"]);
+            const sameFamily =
+                enteredUnit === productUnit ||
+                (weightUnits.has(enteredUnit) && weightUnits.has(productUnit)) ||
+                (volumeUnits.has(enteredUnit) && volumeUnits.has(productUnit)) ||
+                (countUnits.has(enteredUnit) && countUnits.has(productUnit)) ||
+                (lengthUnits.has(enteredUnit) && lengthUnits.has(productUnit));
+
+            if (!sameFamily) {
                 throw new Error(
-                    `${product[0].product_name} is inactive and cannot be sold`
+                    `Cannot convert ${enteredUnit} to ${productUnit} for ${product.product_name}.`
                 );
             }
 
-            const { totalPrice } = calculatePrice(
-                product[0],
-                Number(item.quantity),
+            const { totalPrice, unitPrice, convertedQuantity } = calculatePrice(
+                product,
+                quantity,
                 enteredUnit
             );
 
+            if (
+                !Number.isFinite(convertedQuantity) ||
+                convertedQuantity <= 0 ||
+                !Number.isFinite(totalPrice)
+            ) {
+                throw new Error(`Invalid quantity or price for ${product.product_name}.`);
+            }
+
             subtotal += totalPrice;
+            requiredStockByProduct.set(
+                productId,
+                (requiredStockByProduct.get(productId) || 0) + convertedQuantity
+            );
+
+            preparedItems.push({
+                productId,
+                product,
+                quantity,
+                enteredUnit,
+                productUnit,
+                convertedQuantity,
+                unitPrice,
+                lineSubtotal: totalPrice,
+                taxRate: Number(product.tax) > 0 ? Number(product.tax) : gstPercent
+            });
+        }
+
+        // Validate combined quantities too, so duplicate product lines cannot oversell stock.
+        for (const [productId, requiredQuantity] of requiredStockByProduct) {
+            const product = productMap.get(productId);
+            if (Number(product.stock) < requiredQuantity) {
+                throw new Error(
+                    `${product.product_name} - only ${product.stock} ${product.price_unit || "pcs"} available in stock.`
+                );
+            }
         }
 
         subtotal = Number(subtotal.toFixed(2));
+        const discountAmount = Number((subtotal * discountPercent / 100).toFixed(2));
 
-        const discountAmount = Number((subtotal * (Number(discount) / 100)).toFixed(2));
-        const taxableAmount = Number((subtotal - discountAmount).toFixed(2));
-        const tax = Number((taxableAmount * (Number(gst) / 100)).toFixed(2));
-        const total_amount = Number((taxableAmount + tax).toFixed(2));
+        // Calculate tax per line so product-specific tax rates are reflected in the invoice.
+        let tax = 0;
+        for (const line of preparedItems) {
+            line.discountShare = subtotal > 0
+                ? Number((discountAmount * line.lineSubtotal / subtotal).toFixed(2))
+                : 0;
+            line.taxableAmount = Math.max(0, line.lineSubtotal - line.discountShare);
+            line.itemTax = Number((line.taxableAmount * line.taxRate / 100).toFixed(2));
+            line.itemTotal = Number((line.taxableAmount + line.itemTax).toFixed(2));
+            tax += line.itemTax;
+        }
+
+        tax = Number(tax.toFixed(2));
+        const total_amount = Number((subtotal - discountAmount + tax).toFixed(2));
         const cgst = Number((tax / 2).toFixed(2));
-        const sgst = Number((tax / 2).toFixed(2));
+        const sgst = Number((tax - cgst).toFixed(2));
 
-        // =====================================
-        // FIND OR CREATE CUSTOMER - SECURED
-        // =====================================
+        let finalCustomerId = customer_id ? Number(customer_id) : null;
 
-        let finalCustomerId = customer_id || null;
+        if (finalCustomerId) {
+            const [customerRows] = await conn.query(
+                "SELECT id FROM customers WHERE id = ? AND business_id = ? LIMIT 1",
+                [finalCustomerId, businessId]
+            );
+            if (customerRows.length === 0) {
+                throw new Error("Customer not found in this business.");
+            }
+        }
 
-        if (customer_phone && customer_phone.trim() !== "") {
-            // SECURITY: Check customer belongs to this business
+        if (customer_phone && String(customer_phone).trim() !== "") {
+            const phone = String(customer_phone).trim();
             const [existingCustomer] = await conn.query(
-                `SELECT id
-                 FROM customers
-                 WHERE business_id = ?
-                 AND customer_phone = ?`,
-                [businessId, customer_phone]
+                `SELECT id FROM customers
+                 WHERE business_id = ? AND customer_phone = ?
+                 LIMIT 1`,
+                [businessId, phone]
             );
 
             if (existingCustomer.length > 0) {
                 finalCustomerId = existingCustomer[0].id;
             } else {
                 const [newCustomer] = await conn.query(
-                    `INSERT INTO customers
-                    (business_id, customer_name, customer_phone)
-                    VALUES (?, ?, ?)`,
-                    [businessId, customer_name || "Walk-in Customer", customer_phone]
+                    `INSERT INTO customers (business_id, customer_name, customer_phone)
+                     VALUES (?, ?, ?)`,
+                    [businessId, customer_name || "Walk-in Customer", phone]
                 );
                 finalCustomerId = newCustomer.insertId;
             }
         }
 
-        const invoice_no = "INV" + Date.now();
+        const invoice_no = `INV${Date.now()}-${Math.floor(Math.random() * 1000).toString().padStart(3, "0")}`;
 
         const [sale] = await conn.query(
             `INSERT INTO sales
-            (business_id, customer_id, customer_name, customer_phone,
-             invoice_no, subtotal, discount, gst_percent,
-             cgst, sgst, tax, total_amount,
-             payment_method, payment_status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+             (business_id, customer_id, customer_name, customer_phone,
+              invoice_no, subtotal, discount, gst_percent,
+              cgst, sgst, tax, total_amount,
+              payment_method, payment_status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [
                 businessId,
                 finalCustomerId,
@@ -183,7 +299,7 @@ exports.createSale = async (req, res) => {
                 invoice_no,
                 subtotal,
                 discountAmount,
-                Number(gst),
+                gstPercent,
                 cgst,
                 sgst,
                 tax,
@@ -195,86 +311,51 @@ exports.createSale = async (req, res) => {
 
         const saleId = sale.insertId;
 
-        // SECOND LOOP: Save sale items and update stock
-        for (const item of items) {
-            // SECURITY: Re-verify product belongs to this business
-            const [product] = await conn.query(
-                "SELECT * FROM products WHERE id = ? AND business_id = ?",
-                [item.product_id, businessId]
-            );
-
-            if (product.length === 0) {
-                throw new Error("Product Not Found in this business");
-            }
-
-            const enteredQuantity = Number(item.quantity);
-            const enteredUnit = item.entered_unit || 'pcs';
-            const productUnit = product[0].price_unit || 'pcs';
-
-            const convertedQuantity = convertUnit(enteredQuantity, enteredUnit, productUnit);
-
-            if (convertedQuantity <= 0) {
-                throw new Error("Invalid quantity after conversion");
-            }
-
-            if (product[0].stock < convertedQuantity) {
-                throw new Error(
-                    `${product[0].product_name} - Only ${product[0].stock} ${productUnit} available in stock`
-                );
-            }
-
-            const { totalPrice, unitPrice, convertedQuantity: calcConvertedQty } = calculatePrice(
-                product[0],
-                enteredQuantity,
-                enteredUnit
-            );
-
-            const productTaxRate = product[0].tax || Number(gst);
-            const itemTax = Number((totalPrice * (productTaxRate / 100)).toFixed(2));
-            const itemTotal = Number((totalPrice + itemTax).toFixed(2));
-
+        for (const line of preparedItems) {
             await conn.query(
                 `INSERT INTO sale_items
-                (sale_id, product_id, product_name,
-                 quantity, entered_quantity, entered_unit,
-                 base_quantity, base_price, base_unit,
-                 price, tax, total, tax_rate)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                 (sale_id, product_id, product_name,
+                  quantity, entered_quantity, entered_unit,
+                  base_quantity, base_price, base_unit,
+                  price, tax, total, tax_rate)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 [
                     saleId,
-                    item.product_id,
-                    product[0].product_name,
-                    convertedQuantity,
-                    enteredQuantity,
-                    enteredUnit,
-                    convertedQuantity,
-                    unitPrice,
-                    productUnit,
-                    unitPrice,
-                    itemTax,
-                    itemTotal,
-                    productTaxRate
+                    line.productId,
+                    line.product.product_name,
+                    line.convertedQuantity,
+                    line.quantity,
+                    line.enteredUnit,
+                    line.convertedQuantity,
+                    line.unitPrice,
+                    line.productUnit,
+                    line.unitPrice,
+                    line.itemTax,
+                    line.itemTotal,
+                    line.taxRate
                 ]
-            );
-
-            await conn.query(
-                `UPDATE products
-                 SET stock = stock - ?
-                 WHERE id = ? AND business_id = ?`,
-                [convertedQuantity, item.product_id, businessId]
             );
         }
 
-        // =====================================
-        // UPDATE CUSTOMER PURCHASE DETAILS
-        // =====================================
+        // Atomic stock decrement with a stock guard as an additional safety check.
+        for (const [productId, requiredQuantity] of requiredStockByProduct) {
+            const [stockUpdate] = await conn.query(
+                `UPDATE products
+                 SET stock = stock - ?
+                 WHERE id = ? AND business_id = ? AND stock >= ?`,
+                [requiredQuantity, productId, businessId, requiredQuantity]
+            );
+
+            if (stockUpdate.affectedRows !== 1) {
+                throw new Error(`Stock changed while processing product ID ${productId}. Please retry the sale.`);
+            }
+        }
 
         if (finalCustomerId) {
-            // SECURITY: Verify customer belongs to this business
             await conn.query(
                 `UPDATE customers
-                 SET total_orders = total_orders + 1,
-                     total_spent = total_spent + ?,
+                 SET total_orders = COALESCE(total_orders, 0) + 1,
+                     total_spent = COALESCE(total_spent, 0) + ?,
                      last_purchase = NOW()
                  WHERE id = ? AND business_id = ?`,
                 [total_amount, finalCustomerId, businessId]
@@ -283,29 +364,35 @@ exports.createSale = async (req, res) => {
 
         await conn.commit();
 
-        res.json({
+        return res.status(201).json({
             success: true,
             message: "Sale Created Successfully",
             saleId,
             invoice_no,
             subtotal,
             discount: discountAmount,
-            gst_percent: Number(gst),
+            gst_percent: gstPercent,
             cgst,
             sgst,
             tax,
             total_amount
         });
-
     } catch (err) {
-        await conn.rollback();
-        console.log(err);
-        res.status(500).json({
+        if (conn) {
+            try {
+                await conn.rollback();
+            } catch (rollbackError) {
+                console.error("Sale rollback error:", rollbackError);
+            }
+        }
+
+        console.error("Create Sale Error:", err);
+        return res.status(500).json({
             success: false,
-            message: err.message
+            message: err.message || "Failed to create sale"
         });
     } finally {
-        conn.release();
+        if (conn) conn.release();
     }
 };
 
@@ -315,50 +402,88 @@ exports.createSale = async (req, res) => {
 
 exports.getSales = async (req, res) => {
     try {
-        // SECURITY: Use businessId from middleware, not from query params
-        const businessId = req.businessId;
+        const businessId = Number(req.businessId);
 
-        if (!businessId) {
+        if (!Number.isInteger(businessId) || businessId <= 0) {
             return res.status(400).json({
                 success: false,
                 message: "Business not found"
             });
         }
 
-        const [rows] = await db.query(
+        // Pagination prevents loading every sale and its items into memory at once.
+        const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+        const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
+        const offset = (page - 1) * limit;
+
+        const [[countRow]] = await db.query(
+            "SELECT COUNT(*) AS total FROM sales WHERE business_id = ?",
+            [businessId]
+        );
+
+        const [sales] = await db.query(
             `SELECT
                 id, invoice_no, customer_name, customer_phone,
                 subtotal, discount, gst_percent, cgst, sgst,
                 tax, total_amount, payment_method, payment_status,
                 created_at
-            FROM sales
-            WHERE business_id = ?
-            ORDER BY id DESC`,
-            [businessId]
+             FROM sales
+             WHERE business_id = ?
+             ORDER BY id DESC
+             LIMIT ? OFFSET ?`,
+            [businessId, limit, offset]
         );
 
-        for (const sale of rows) {
+        // One query for all items on this page avoids the N+1 query pattern.
+        if (sales.length > 0) {
+            const saleIds = sales.map(sale => sale.id);
+            const placeholders = saleIds.map(() => "?").join(",");
+
             const [items] = await db.query(
                 `SELECT
-                    product_name, entered_quantity, entered_unit,
-                    base_quantity, base_unit, price, total
+                    sale_id,
+                    product_name,
+                    entered_quantity,
+                    entered_unit,
+                    base_quantity,
+                    base_unit,
+                    price,
+                    total
                  FROM sale_items
-                 WHERE sale_id = ?`,
-                [sale.id]
+                 WHERE sale_id IN (${placeholders})
+                 ORDER BY id ASC`,
+                saleIds
             );
-            sale.items = items;
+
+            const itemsBySaleId = new Map();
+            for (const item of items) {
+                if (!itemsBySaleId.has(item.sale_id)) {
+                    itemsBySaleId.set(item.sale_id, []);
+                }
+                itemsBySaleId.get(item.sale_id).push(item);
+            }
+
+            for (const sale of sales) {
+                sale.items = itemsBySaleId.get(sale.id) || [];
+            }
+        } else {
+            for (const sale of sales) sale.items = [];
         }
 
-        res.json({
+        return res.json({
             success: true,
-            total: rows.length,
-            data: rows
+            total: Number(countRow.total) || 0,
+            page,
+            limit,
+            totalPages: Math.ceil((Number(countRow.total) || 0) / limit),
+            data: sales
         });
-
     } catch (err) {
-        res.status(500).json({
+        console.error("Get Sales Error:", err);
+        return res.status(500).json({
             success: false,
-            message: err.message
+            message: "Failed to fetch sales",
+            error: err.message
         });
     }
 };
