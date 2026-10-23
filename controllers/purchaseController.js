@@ -11,7 +11,7 @@ exports.createPurchase = async (req, res) => {
 
         await connection.beginTransaction();
 
-        const businessId = req.businessId;
+        const businessId = Number(req.businessId);
 
         const {
             supplier_id,
@@ -27,24 +27,61 @@ exports.createPurchase = async (req, res) => {
         // VALIDATION
         // =====================================
 
-        if (!businessId) {
+        if (!Number.isInteger(businessId) || businessId <= 0) {
+            await connection.rollback();
             return res.status(400).json({
                 success: false,
                 message: "Business ID is required"
             });
         }
 
-        if (!supplier_id) {
+        if (!Number.isInteger(Number(supplier_id)) || Number(supplier_id) <= 0) {
+            await connection.rollback();
             return res.status(400).json({
                 success: false,
                 message: "Supplier is required"
             });
         }
 
-        if (!products || products.length === 0) {
+        if (!Array.isArray(products) || products.length === 0) {
+            await connection.rollback();
             return res.status(400).json({
                 success: false,
                 message: "Products are required"
+            });
+        }
+
+        // Validate all line items before any database writes.
+        for (const item of products) {
+            const productId = Number(item?.product_id);
+            const quantity = Number(item?.quantity);
+            const purchasePrice = Number(item?.purchase_price);
+            if (
+                !Number.isInteger(productId) || productId <= 0 ||
+                !Number.isFinite(quantity) || quantity <= 0 ||
+                !Number.isFinite(purchasePrice) || purchasePrice < 0
+            ) {
+                await connection.rollback();
+                return res.status(400).json({
+                    success: false,
+                    message: "Each purchase item needs a valid product, positive quantity, and non-negative purchase price."
+                });
+            }
+        }
+
+        // Validate discount, tax, and payment values before calculating totals.
+        const requestedDiscount = Number(discount || 0);
+        const requestedTax = Number(tax || 0);
+        const requestedPaid = Number(paid_amount || 0);
+        if (
+            !Number.isFinite(requestedDiscount) || requestedDiscount < 0 ||
+            !Number.isFinite(requestedTax) || requestedTax < 0 ||
+            !Number.isFinite(requestedPaid) || requestedPaid < 0
+        ) {
+            await connection.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Discount, tax, and paid amount must be valid non-negative numbers."
             });
         }
 
@@ -104,11 +141,8 @@ exports.createPurchase = async (req, res) => {
         // DISCOUNT & TAX
         // =====================================
 
-        const finalDiscount =
-            Number(discount || 0);
-
-        const finalTax =
-            Number(tax || 0);
+        const finalDiscount = requestedDiscount;
+        const finalTax = requestedTax;
 
         // =====================================
         // TOTAL
@@ -123,11 +157,25 @@ exports.createPurchase = async (req, res) => {
         // PAYMENT
         // =====================================
 
-        const paid =
-            Number(paid_amount || 0);
+        const paid = requestedPaid;
+        if (finalDiscount > subtotal) {
+            await connection.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Discount cannot exceed the purchase subtotal."
+            });
+        }
+        if (paid > totalAmount) {
+            await connection.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Paid amount cannot exceed the purchase total."
+            });
+        }
 
-        const due =
-            totalAmount - paid;
+        const roundedSubtotal = Number(subtotal.toFixed(2));
+        const roundedTotalAmount = Number(totalAmount.toFixed(2));
+        const due = Number((roundedTotalAmount - paid).toFixed(2));
 
         // =====================================
         // INSERT PURCHASE
@@ -158,14 +206,14 @@ exports.createPurchase = async (req, res) => {
                     businessId,
                     supplier_id,
                     invoiceNo,
-                    subtotal,
+                    roundedSubtotal,
                     finalDiscount,
                     finalTax,
-                    totalAmount,
+                    roundedTotalAmount,
                     payment_method || "Cash",
 
                     // Automatically determine status
-                    paid >= totalAmount
+                    paid >= roundedTotalAmount
                         ? "Paid"
                         : paid > 0
                             ? "Partial"
@@ -683,13 +731,22 @@ exports.updatePurchase = async (req, res) => {
         }
 
         const total = Number(purchase[0].total_amount);
+        const paid = paid_amount === undefined
+            ? Number(purchase[0].paid_amount || 0)
+            : Number(paid_amount);
 
-        const paid = Number(paid_amount || 0);
+        if (!Number.isFinite(paid) || paid < 0 || paid > total) {
+            await connection.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Paid amount must be between zero and the purchase total."
+            });
+        }
 
-        const due = total - paid;
+        const due = Number((total - paid).toFixed(2));
+        const computedStatus = due <= 0 ? "Paid" : paid > 0 ? "Partial" : "Unpaid";
 
         await connection.query(
-
             `UPDATE purchases
              SET
                 payment_method = ?,
@@ -698,17 +755,15 @@ exports.updatePurchase = async (req, res) => {
                 due_amount = ?,
                 notes = ?
              WHERE id = ? AND business_id = ?`,
-
             [
                 payment_method || purchase[0].payment_method,
-                payment_status || purchase[0].payment_status,
+                computedStatus,
                 paid,
                 due,
-                notes || purchase[0].notes,
+                notes !== undefined ? notes : purchase[0].notes,
                 id,
                 businessId
             ]
-
         );
 
         await connection.commit();
@@ -788,23 +843,31 @@ exports.deletePurchase = async (req, res) => {
 
         );
 
-        // Reduce Stock
+        // Reduce stock safely; refuse deletion if it would make inventory negative.
         for (const item of items) {
-
-            await connection.query(
-
-                `UPDATE products
-                 SET stock = stock - ?
-                 WHERE id = ? AND business_id = ?`,
-
-                [
-                    item.quantity,
-                    item.product_id,
-                    businessId
-                ]
-
+            const [productRows] = await connection.query(
+                `SELECT stock FROM products
+                 WHERE id = ? AND business_id = ?
+                 FOR UPDATE`,
+                [item.product_id, businessId]
             );
 
+            if (productRows.length === 0) {
+                throw new Error(`Product ${item.product_id} was not found while deleting purchase.`);
+            }
+
+            if (Number(productRows[0].stock) < Number(item.quantity)) {
+                throw new Error(
+                    `Cannot delete this purchase: product ID ${item.product_id} has only ${productRows[0].stock} in stock, but ${item.quantity} must be reversed.`
+                );
+            }
+
+            await connection.query(
+                `UPDATE products
+                 SET stock = stock - ?
+                 WHERE id = ? AND business_id = ? AND stock >= ?`,
+                [item.quantity, item.product_id, businessId, item.quantity]
+            );
         }
 
         // Delete Items

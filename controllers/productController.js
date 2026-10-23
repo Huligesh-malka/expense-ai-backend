@@ -41,6 +41,20 @@ exports.createProduct = async (req, res) => {
         min_stock = Number(min_stock) || 5;
         tax = Number(tax) || 0;
 
+        if (
+            !Number.isFinite(purchase_price) || purchase_price < 0 ||
+            !Number.isFinite(selling_price) || selling_price <= 0 ||
+            !Number.isFinite(price_per) || price_per <= 0 ||
+            !Number.isFinite(stock) || stock < 0 ||
+            !Number.isFinite(min_stock) || min_stock < 0 ||
+            !Number.isFinite(tax) || tax < 0 || tax > 100
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Prices, stock, and minimum stock must be valid non-negative numbers; selling price and price per must be greater than zero; tax must be between 0 and 100."
+            });
+        }
+
         // Validate required fields
         if (!product_name || product_name === "") {
             return res.status(400).json({
@@ -217,14 +231,34 @@ exports.getProducts = async (req, res) => {
             params.push(searchPattern, searchPattern, searchPattern);
         }
 
-        // Add ordering (no pagination)
+        // Preserve the existing all-products response unless pagination is requested.
         query += ` ORDER BY id DESC`;
 
-        const [rows] = await db.query(query, params);
+        const paginationRequested = req.query.page !== undefined || req.query.limit !== undefined;
+        let rows;
+        let total;
+        let page;
+        let limit;
+
+        if (paginationRequested) {
+            page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+            limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 50));
+            const countQuery = query.replace(/SELECT \* FROM products/i, "SELECT COUNT(*) AS total FROM products").replace(/ ORDER BY id DESC$/, "");
+            const [countRows] = await db.query(countQuery, params);
+            total = Number(countRows[0]?.total || 0);
+            const offset = (page - 1) * limit;
+            const [pagedRows] = await db.query(`${query} LIMIT ? OFFSET ?`, [...params, limit, offset]);
+            rows = pagedRows;
+        } else {
+            const [allRows] = await db.query(query, params);
+            rows = allRows;
+            total = rows.length;
+        }
 
         res.json({
             success: true,
-            total: rows.length,
+            total,
+            ...(paginationRequested ? { page, limit, totalPages: Math.ceil(total / limit) } : {}),
             data: rows
         });
 
@@ -283,7 +317,10 @@ exports.getProduct = async (req, res) => {
 exports.updateProduct = async (req, res) => {
     try {
         const { id } = req.params;
-        const businessId = req.businessId;
+        const businessId = Number(req.businessId);
+        if (!Number.isInteger(businessId) || businessId <= 0) {
+            return res.status(400).json({ success: false, message: "Business ID is required." });
+        }
 
         let {
             category,
@@ -317,6 +354,23 @@ exports.updateProduct = async (req, res) => {
         stock = Number(stock) || 0;
         min_stock = Number(min_stock) || 5;
         tax = Number(tax) || 0;
+
+        if (
+            !Number.isFinite(purchase_price) || purchase_price < 0 ||
+            !Number.isFinite(selling_price) || selling_price <= 0 ||
+            !Number.isFinite(price_per) || price_per <= 0 ||
+            !Number.isFinite(stock) || stock < 0 ||
+            !Number.isFinite(min_stock) || min_stock < 0 ||
+            !Number.isFinite(tax) || tax < 0 || tax > 100
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Prices, stock, and minimum stock must be valid; tax must be between 0 and 100."
+            });
+        }
+        if (status !== undefined && !["active", "inactive"].includes(status)) {
+            return res.status(400).json({ success: false, message: "Invalid product status." });
+        }
 
         // Validate price_per
         if (price_per <= 0) {

@@ -1,5 +1,12 @@
 const db = require("../config/db");
 
+const badRequest = (message, statusCode = 400) => {
+    const error = new Error(message);
+    error.statusCode = statusCode;
+    return error;
+};
+
+
 // =====================================
 // HELPER FUNCTIONS
 // =====================================
@@ -81,6 +88,26 @@ exports.createSale = async (req, res) => {
             items
         } = req.body;
 
+        const normalizedCustomerPhone = String(customer_phone || "").trim();
+        if (!/^\d{10}$/.test(normalizedCustomerPhone)) {
+            await conn.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Customer mobile number is required and must contain exactly 10 digits."
+            });
+        }
+
+        const allowedPaymentMethods = new Set(["Cash", "Card", "UPI", "Online", "Credit"]);
+        const allowedPaymentStatuses = new Set(["Paid", "Pending", "Partial", "Unpaid"]);
+        if (payment_method && !allowedPaymentMethods.has(payment_method)) {
+            await conn.rollback();
+            return res.status(400).json({ success: false, message: "Invalid payment method." });
+        }
+        if (payment_status && !allowedPaymentStatuses.has(payment_status)) {
+            await conn.rollback();
+            return res.status(400).json({ success: false, message: "Invalid payment status." });
+        }
+
         if (!Array.isArray(items) || items.length === 0) {
             await conn.rollback();
             return res.status(400).json({
@@ -161,11 +188,11 @@ exports.createSale = async (req, res) => {
             const productUnit = product.price_unit || "pcs";
 
             if (!validUnits.has(enteredUnit)) {
-                throw new Error(`Invalid unit: ${enteredUnit}`);
+                throw badRequest(`Invalid unit: ${enteredUnit}`);
             }
 
             if (product.status !== "active") {
-                throw new Error(`${product.product_name} is inactive and cannot be sold.`);
+                throw badRequest(`${product.product_name} is inactive and cannot be sold.`);
             }
 
             // Unit conversion is only valid within compatible measurement families.
@@ -181,7 +208,7 @@ exports.createSale = async (req, res) => {
                 (lengthUnits.has(enteredUnit) && lengthUnits.has(productUnit));
 
             if (!sameFamily) {
-                throw new Error(
+                throw badRequest(
                     `Cannot convert ${enteredUnit} to ${productUnit} for ${product.product_name}.`
                 );
             }
@@ -197,7 +224,7 @@ exports.createSale = async (req, res) => {
                 convertedQuantity <= 0 ||
                 !Number.isFinite(totalPrice)
             ) {
-                throw new Error(`Invalid quantity or price for ${product.product_name}.`);
+                throw badRequest(`Invalid quantity or price for ${product.product_name}.`);
             }
 
             subtotal += totalPrice;
@@ -223,7 +250,7 @@ exports.createSale = async (req, res) => {
         for (const [productId, requiredQuantity] of requiredStockByProduct) {
             const product = productMap.get(productId);
             if (Number(product.stock) < requiredQuantity) {
-                throw new Error(
+                throw badRequest(
                     `${product.product_name} - only ${product.stock} ${product.price_unit || "pcs"} available in stock.`
                 );
             }
@@ -257,12 +284,12 @@ exports.createSale = async (req, res) => {
                 [finalCustomerId, businessId]
             );
             if (customerRows.length === 0) {
-                throw new Error("Customer not found in this business.");
+                throw badRequest("Customer not found in this business.");
             }
         }
 
-        if (customer_phone && String(customer_phone).trim() !== "") {
-            const phone = String(customer_phone).trim();
+        if (normalizedCustomerPhone) {
+            const phone = normalizedCustomerPhone;
             const [existingCustomer] = await conn.query(
                 `SELECT id FROM customers
                  WHERE business_id = ? AND customer_phone = ?
@@ -295,7 +322,7 @@ exports.createSale = async (req, res) => {
                 businessId,
                 finalCustomerId,
                 customer_name || "Walk-in Customer",
-                customer_phone || null,
+                normalizedCustomerPhone,
                 invoice_no,
                 subtotal,
                 discountAmount,
@@ -347,7 +374,7 @@ exports.createSale = async (req, res) => {
             );
 
             if (stockUpdate.affectedRows !== 1) {
-                throw new Error(`Stock changed while processing product ID ${productId}. Please retry the sale.`);
+                throw badRequest(`Stock changed while processing product ID ${productId}. Please retry the sale.`);
             }
         }
 
@@ -387,7 +414,7 @@ exports.createSale = async (req, res) => {
         }
 
         console.error("Create Sale Error:", err);
-        return res.status(500).json({
+        return res.status(err.statusCode || 500).json({
             success: false,
             message: err.message || "Failed to create sale"
         });
@@ -550,6 +577,14 @@ exports.updatePaymentStatus = async (req, res) => {
         const { id } = req.params;
         const { payment_status } = req.body;
         const businessId = req.businessId;
+
+        const allowedStatuses = new Set(["Paid", "Pending", "Partial", "Unpaid"]);
+        if (!allowedStatuses.has(payment_status)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid payment status."
+            });
+        }
 
         if (!businessId) {
             return res.status(400).json({
