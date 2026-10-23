@@ -1,17 +1,21 @@
+
 const db = require("../config/db");
 
+// =====================================
+// DASHBOARD
+// =====================================
 exports.getDashboard = async (req, res) => {
     try {
-        const businessId = req.businessId;
+        const businessId = Number(req.businessId);
 
-        if (!businessId) {
+        if (!Number.isInteger(businessId) || businessId <= 0) {
             return res.status(400).json({
                 success: false,
-                message: "Business ID is required."
+                message: "Valid Business ID is required."
             });
         }
 
-        // Get all dashboard data in parallel for better performance
+        // Run independent dashboard queries in parallel.
         const [
             [products],
             [lowStock],
@@ -26,174 +30,210 @@ exports.getDashboard = async (req, res) => {
             [customers],
             [suppliers]
         ] = await Promise.all([
-            // Total Products
-            db.query("SELECT COUNT(*) AS total FROM products WHERE business_id=?", [businessId]),
-            
-            // Low Stock
+            // Total products
             db.query(
-                `SELECT COUNT(*) AS total 
-                 FROM products 
-                 WHERE business_id=? AND stock <= min_stock`,
+                `SELECT COUNT(*) AS total
+                 FROM products
+                 WHERE business_id = ?`,
                 [businessId]
             ),
-            
-            // Total Stock
+
+            // Low stock products
             db.query(
-                `SELECT IFNULL(SUM(stock), 0) AS total 
-                 FROM products 
-                 WHERE business_id=?`,
+                `SELECT COUNT(*) AS total
+                 FROM products
+                 WHERE business_id = ?
+                   AND stock <= min_stock
+                   AND status = 'active'`,
                 [businessId]
             ),
-            
-            // Inventory Value
+
+            // Total stock
             db.query(
-                `SELECT IFNULL(SUM(stock * purchase_price), 0) AS total 
-                 FROM products 
-                 WHERE business_id=?`,
+                `SELECT COALESCE(SUM(stock), 0) AS total
+                 FROM products
+                 WHERE business_id = ?`,
                 [businessId]
             ),
-            
-            // Active Products
+
+            // Inventory purchase value
             db.query(
-                `SELECT COUNT(*) AS total 
-                 FROM products 
-                 WHERE business_id=? AND status='active'`,
+                `SELECT CAST(
+                    COALESCE(SUM(stock * purchase_price), 0)
+                    AS DECIMAL(15, 2)
+                 ) AS total
+                 FROM products
+                 WHERE business_id = ?`,
                 [businessId]
             ),
-            
-            // Inactive Products
+
+            // Active products
             db.query(
-                `SELECT COUNT(*) AS total 
-                 FROM products 
-                 WHERE business_id=? AND status='inactive'`,
+                `SELECT COUNT(*) AS total
+                 FROM products
+                 WHERE business_id = ?
+                   AND status = 'active'`,
                 [businessId]
             ),
-            
-            // Total Categories
+
+            // Inactive products
             db.query(
-                `SELECT COUNT(DISTINCT category) AS total 
-                 FROM products 
-                 WHERE business_id=? AND category IS NOT NULL AND category != ''`,
+                `SELECT COUNT(*) AS total
+                 FROM products
+                 WHERE business_id = ?
+                   AND status = 'inactive'`,
                 [businessId]
             ),
-            
-            // Today's Sales
+
+            // Total categories
             db.query(
-    `SELECT IFNULL(SUM(total_amount), 0) AS total
-     FROM sales
-     WHERE business_id=?
-     AND created_at >= CURDATE()
-     AND created_at < CURDATE() + INTERVAL 1 DAY`,
-    [businessId]
-),
-            
-            // Month's Sales
-            db.query(
-                `SELECT IFNULL(SUM(total_amount), 0) AS total 
-                 FROM sales 
-                 WHERE business_id=? 
-                 AND MONTH(created_at) = MONTH(CURDATE()) 
-                 AND YEAR(created_at) = YEAR(CURDATE())`,
+                `SELECT COUNT(DISTINCT category) AS total
+                 FROM products
+                 WHERE business_id = ?
+                   AND category IS NOT NULL
+                   AND category <> ''`,
                 [businessId]
             ),
-            
-            // Total Sales (All time)
+
+            // Today's paid sales
             db.query(
-                `SELECT IFNULL(SUM(total_amount), 0) AS total 
-                 FROM sales 
-                 WHERE business_id=?`,
+                `SELECT CAST(
+                    COALESCE(SUM(total_amount), 0)
+                    AS DECIMAL(15, 2)
+                 ) AS total
+                 FROM sales
+                 WHERE business_id = ?
+                   AND payment_status = 'Paid'
+                   AND created_at >= CURDATE()
+                   AND created_at < CURDATE() + INTERVAL 1 DAY`,
                 [businessId]
             ),
-            
-            // Total Customers
+
+            // Current month's paid sales
             db.query(
-                `SELECT COUNT(*) AS total 
-                 FROM customers 
-                 WHERE business_id=?`,
+                `SELECT CAST(
+                    COALESCE(SUM(total_amount), 0)
+                    AS DECIMAL(15, 2)
+                 ) AS total
+                 FROM sales
+                 WHERE business_id = ?
+                   AND payment_status = 'Paid'
+                   AND created_at >= DATE_FORMAT(CURDATE(), '%Y-%m-01')
+                   AND created_at < DATE_FORMAT(
+                       CURDATE() + INTERVAL 1 MONTH, '%Y-%m-01'
+                   )`,
                 [businessId]
             ),
-            
-            // Total Suppliers
+
+            // All-time paid sales
             db.query(
-                `SELECT COUNT(*) AS total 
-                 FROM suppliers 
-                 WHERE business_id=?`,
+                `SELECT CAST(
+                    COALESCE(SUM(total_amount), 0)
+                    AS DECIMAL(15, 2)
+                 ) AS total
+                 FROM sales
+                 WHERE business_id = ?
+                   AND payment_status = 'Paid'`,
+                [businessId]
+            ),
+
+            // Total customers
+            db.query(
+                `SELECT COUNT(*) AS total
+                 FROM customers
+                 WHERE business_id = ?`,
+                [businessId]
+            ),
+
+            // Total suppliers
+            db.query(
+                `SELECT COUNT(*) AS total
+                 FROM suppliers
+                 WHERE business_id = ?`,
                 [businessId]
             )
         ]);
 
+        // Preserve the existing response field names.
         res.json({
             success: true,
-            totalProducts: products[0].total || 0,
-            totalCategories: categories[0].total || 0,
-            todaySales: todaySales[0].total || 0,
-            monthSales: monthSales[0].total || 0,
-            totalSales: totalSales[0].total || 0,
-            totalCustomers: customers[0].total || 0,
-            totalSuppliers: suppliers[0].total || 0,
-            lowStock: lowStock[0].total || 0,
-            totalStock: stock[0].total || 0,
-            inventoryValue: inventory[0].total || 0,
-            activeProducts: active[0].total || 0,
-            inactiveProducts: inactive[0].total || 0
+            totalProducts: Number(products[0].total) || 0,
+            totalCategories: Number(categories[0].total) || 0,
+            todaySales: Number(todaySales[0].total) || 0,
+            monthSales: Number(monthSales[0].total) || 0,
+            totalSales: Number(totalSales[0].total) || 0,
+            totalCustomers: Number(customers[0].total) || 0,
+            totalSuppliers: Number(suppliers[0].total) || 0,
+            lowStock: Number(lowStock[0].total) || 0,
+            totalStock: Number(stock[0].total) || 0,
+            inventoryValue: Number(inventory[0].total) || 0,
+            activeProducts: Number(active[0].total) || 0,
+            inactiveProducts: Number(inactive[0].total) || 0
         });
-
     } catch (err) {
         console.error("Dashboard Error:", err);
+
         res.status(500).json({
             success: false,
-            message: err.message || "Failed to load dashboard data"
+            message: "Failed to load dashboard data"
         });
     }
 };
+
+// =====================================
+// RECENT SALES
+// =====================================
 exports.getRecentSales = async (req, res) => {
-
     try {
+        // Use the authenticated business ID, not a client-supplied ID.
+        const businessId = Number(req.businessId);
 
-        const businessId = Number(req.query.business_id);
+        if (!Number.isInteger(businessId) || businessId <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid Business ID is required."
+            });
+        }
 
         const [sales] = await db.query(
-
             `SELECT
                 s.id,
                 s.invoice_no,
-                s.total_amount,
+                CAST(s.total_amount AS DECIMAL(15, 2)) AS total_amount,
                 s.payment_method,
                 s.payment_status,
                 s.created_at,
                 COUNT(si.id) AS items
              FROM sales s
              LEFT JOIN sale_items si
-             ON s.id = si.sale_id
-             WHERE s.business_id=?
-             GROUP BY s.id
-             ORDER BY s.created_at DESC
+                ON s.id = si.sale_id
+             WHERE s.business_id = ?
+             GROUP BY
+                s.id,
+                s.invoice_no,
+                s.total_amount,
+                s.payment_method,
+                s.payment_status,
+                s.created_at
+             ORDER BY s.created_at DESC, s.id DESC
              LIMIT 10`,
-
             [businessId]
-
         );
 
-        res.json({
-
-            success:true,
-            data:sales
-
+        return res.json({
+            success: true,
+            data: sales.map(sale => ({
+                ...sale,
+                total_amount: Number(sale.total_amount),
+                items: Number(sale.items)
+            }))
         });
+    } catch (err) {
+        console.error("Recent Sales Error:", err);
 
-    }
-
-    catch(err){
-
-        console.log(err);
-
-        res.status(500).json({
-
-            success:false,
-            message:err.message
-
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch recent sales"
         });
-
     }
-
 };
