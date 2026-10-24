@@ -910,7 +910,7 @@ exports.createQROrder = async (req, res) => {
             // IMPORTANT:
             // Stock is NOT deducted when customer places order.
             //
-            // Stock is deducted after owner confirms payment.
+            // Stock is deducted when the owner accepts the order.
             // ----------------------------------------------------
 
             if (
@@ -1002,6 +1002,31 @@ exports.createQROrder = async (req, res) => {
             });
         }
 
+
+        // A product can appear on multiple cart lines. Validate the combined
+        // quantity too, otherwise separate lines could exceed available stock.
+        const requestedByProduct = new Map();
+        for (const item of orderItems) {
+            requestedByProduct.set(
+                Number(item.product_id),
+                (requestedByProduct.get(Number(item.product_id)) || 0) + Number(item.quantity)
+            );
+        }
+        for (const [productId, requestedQuantity] of requestedByProduct) {
+            const [stockRows] = await connection.query(
+                `SELECT product_name, stock, price_unit
+                 FROM products
+                 WHERE id = ? AND business_id = ?
+                 FOR UPDATE`,
+                [productId, businessId]
+            );
+            if (!stockRows.length || Number(stockRows[0].stock) < requestedQuantity) {
+                const productName = stockRows[0]?.product_name || "Product";
+                const available = stockRows[0]?.stock ?? 0;
+                const unit = stockRows[0]?.price_unit || "pcs";
+                throw new Error(`${productName} - only ${available} ${unit} available for ${requestedQuantity} requested`);
+            }
+        }
 
         subtotal =
             Number(
@@ -1661,123 +1686,141 @@ exports.updateQROrderStatus = async (
 
 
         // --------------------------------------------------------
-        // ACCEPT ORDER
-        //
-        // Customer now gets permission/instruction
-        // to pay owner.
+        // ACCEPT ORDER: reserve stock by decrementing it atomically.
+        // The order row is locked above, preventing duplicate accepts.
         // --------------------------------------------------------
-
-        if (
-            status === "accepted"
-        ) {
-
-            if (
-                order.order_status !==
-                    "new"
-            ) {
-
-                throw new Error(
-                    "Only new orders can be accepted"
-                );
+        if (status === "accepted") {
+            if (order.order_status !== "new") {
+                throw new Error("Only new orders can be accepted");
             }
 
-
-            await connection.query(
-                `
-                UPDATE qr_orders
-
-                SET
-                    order_status = 'accepted'
-
-                WHERE id = ?
-
-                AND business_id = ?
-                `,
-                [
-                    id,
-                    businessId
-                ]
+            const [items] = await connection.query(
+                `SELECT product_id, product_name, quantity
+                 FROM qr_order_items
+                 WHERE order_id = ?
+                 ORDER BY product_id ASC`,
+                [id]
             );
 
+            if (!items.length) throw new Error("Order has no items");
+
+            // Aggregate duplicate lines for the same product before stock checks.
+            const required = new Map();
+            for (const item of items) {
+                const productId = Number(item.product_id);
+                const quantity = Number(item.quantity);
+                if (!productId || !Number.isFinite(quantity) || quantity <= 0) {
+                    throw new Error(`Invalid quantity for ${item.product_name || "product"}`);
+                }
+                const entry = required.get(productId) || {
+                    product_name: item.product_name,
+                    quantity: 0
+                };
+                entry.quantity += quantity;
+                required.set(productId, entry);
+            }
+
+            // Lock product rows in a stable order to reduce deadlock risk.
+            for (const [productId, item] of [...required.entries()].sort((a, b) => a[0] - b[0])) {
+                const [productRows] = await connection.query(
+                    `SELECT id, product_name, stock, status
+                     FROM products
+                     WHERE id = ? AND business_id = ?
+                     FOR UPDATE`,
+                    [productId, businessId]
+                );
+
+                if (!productRows.length) {
+                    throw new Error(`${item.product_name} no longer exists`);
+                }
+
+                const product = productRows[0];
+                if (product.status !== "active") {
+                    throw new Error(`${product.product_name} is inactive`);
+                }
+                if (Number(product.stock) < item.quantity) {
+                    throw new Error(
+                        `${product.product_name} - only ${product.stock} available; ${item.quantity} required`
+                    );
+                }
+
+                const [updated] = await connection.query(
+                    `UPDATE products
+                     SET stock = stock - ?
+                     WHERE id = ? AND business_id = ? AND stock >= ?`,
+                    [item.quantity, productId, businessId, item.quantity]
+                );
+                if (updated.affectedRows !== 1) {
+                    throw new Error(`Stock changed for ${product.product_name}. Please retry.`);
+                }
+            }
+
+            await connection.query(
+                `UPDATE qr_orders
+                 SET order_status = 'accepted', stock_deducted = TRUE
+                 WHERE id = ? AND business_id = ?`,
+                [id, businessId]
+            );
 
             await connection.commit();
-
-
             return res.json({
-
                 success: true,
-
-                message:
-                    "Order accepted. Customer can now pay.",
-
-                order_status:
-                    "accepted",
-
-                payment_status:
-                    order.payment_status
+                message: "Order accepted and stock updated. Customer can now pay.",
+                order_status: "accepted",
+                payment_status: order.payment_status,
+                stock_deducted: true
             });
         }
 
-
         // --------------------------------------------------------
-        // REJECT / CANCEL
+        // REJECT / CANCEL: restore stock exactly once if it was deducted.
+        // Once preparation has started, use a dedicated return/refund flow.
         // --------------------------------------------------------
-
-        if (
-            status === "rejected" ||
-            status === "cancelled"
-        ) {
-
-            // If stock was already deducted,
-            // do not restore it here.
-            //
-            // Paid orders should be handled through
-            // refund/business logic separately.
-
-            if (
-                order.stock_deducted
-            ) {
-
-                throw new Error(
-                    "Stock has already been deducted. Use refund/cancellation flow."
-                );
+        if (status === "rejected" || status === "cancelled") {
+            if (["processing", "ready", "completed"].includes(order.order_status)) {
+                throw new Error("Preparation has started. Use the return/refund workflow.");
             }
 
+            if (order.stock_deducted) {
+                const [items] = await connection.query(
+                    `SELECT product_id, quantity
+                     FROM qr_order_items
+                     WHERE order_id = ?
+                     ORDER BY product_id ASC`,
+                    [id]
+                );
+
+                const required = new Map();
+                for (const item of items) {
+                    const productId = Number(item.product_id);
+                    required.set(productId, (required.get(productId) || 0) + Number(item.quantity));
+                }
+
+                for (const [productId, quantity] of [...required.entries()].sort((a, b) => a[0] - b[0])) {
+                    await connection.query(
+                        `UPDATE products
+                         SET stock = stock + ?
+                         WHERE id = ? AND business_id = ?`,
+                        [quantity, productId, businessId]
+                    );
+                }
+            }
 
             await connection.query(
-                `
-                UPDATE qr_orders
-
-                SET
-                    order_status = ?
-
-                WHERE id = ?
-
-                AND business_id = ?
-                `,
-                [
-                    status,
-                    id,
-                    businessId
-                ]
+                `UPDATE qr_orders
+                 SET order_status = ?, stock_deducted = FALSE
+                 WHERE id = ? AND business_id = ?`,
+                [status, id, businessId]
             );
 
-
             await connection.commit();
-
-
             return res.json({
-
                 success: true,
-
-                message:
-                    `Order ${status}`,
-
-                order_status:
-                    status
+                message: `Order ${status}; stock restored when applicable. If payment was received, handle the refund separately.`,
+                order_status: status,
+                stock_deducted: false
             });
         }
-
 
         // --------------------------------------------------------
         // PROCESSING / READY / COMPLETED
@@ -2139,146 +2182,11 @@ exports.updateQRPayment = async (
             }
 
 
-            // ----------------------------------------------------
-            // GET ORDER ITEMS
-            // ----------------------------------------------------
-
-            const [items] =
-                await connection.query(
-                    `
-                    SELECT
-
-                        product_id,
-
-                        product_name,
-
-                        quantity
-
-                    FROM qr_order_items
-
-                    WHERE order_id = ?
-                    `,
-                    [id]
-                );
-
-
-            if (
-                items.length === 0
-            ) {
-
-                throw new Error(
-                    "Order has no items"
-                );
+            // Stock is deducted when the owner accepts the order.
+            // Payment confirmation must never deduct stock a second time.
+            if (!order.stock_deducted) {
+                throw new Error("Stock was not reserved for this order. Please re-check the order status.");
             }
-
-
-            // ----------------------------------------------------
-            // DEDUCT STOCK ONLY ON PAYMENT
-            // ----------------------------------------------------
-
-            if (
-                !order.stock_deducted
-            ) {
-
-                for (
-                    const item of items
-                ) {
-
-                    const [
-                        productRows
-                    ] =
-                        await connection.query(
-                            `
-                            SELECT
-
-                                id,
-
-                                product_name,
-
-                                stock,
-
-                                status
-
-                            FROM products
-
-                            WHERE id = ?
-
-                            AND business_id = ?
-
-                            FOR UPDATE
-                            `,
-                            [
-                                item.product_id,
-
-                                businessId
-                            ]
-                        );
-
-
-                    if (
-                        productRows.length ===
-                        0
-                    ) {
-
-                        throw new Error(
-                            `${item.product_name} no longer exists`
-                        );
-                    }
-
-
-                    const product =
-                        productRows[0];
-
-
-                    if (
-                        product.status !==
-                            "active"
-                    ) {
-
-                        throw new Error(
-                            `${product.product_name} is inactive`
-                        );
-                    }
-
-
-                    if (
-                        Number(
-                            product.stock
-                        ) <
-                        Number(
-                            item.quantity
-                        )
-                    ) {
-
-                        throw new Error(
-                            `${product.product_name} - Only ${product.stock} available`
-                        );
-                    }
-
-
-                    await connection.query(
-                        `
-                        UPDATE products
-
-                        SET
-                            stock =
-                            stock - ?
-
-                        WHERE id = ?
-
-                        AND business_id = ?
-                        `,
-                        [
-                            item.quantity,
-
-                            item.product_id,
-
-                            businessId
-                        ]
-                    );
-                }
-            }
-
 
             // ----------------------------------------------------
             // MARK PAYMENT PAID
