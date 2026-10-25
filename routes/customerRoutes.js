@@ -28,6 +28,14 @@ router.get(
     customerController.getCustomers
 );
 
+
+router.get(
+    "/search/:phone",
+    authMiddleware,
+    businessMiddleware,
+    customerController.searchCustomerByPhone
+);
+
 // =====================================
 // CUSTOMER HISTORY
 // IMPORTANT: before /:id
@@ -61,5 +69,10 @@ router.put(
     businessMiddleware,
     customerController.updateCustomer
 );
+
+
+
+// SEARCH CUSTOMER BY PHONE
+
 
 module.exports = router;

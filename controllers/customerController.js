@@ -340,3 +340,61 @@ AND business_id = ?
         });
     }
 };
+
+
+
+// =====================================
+// SEARCH CUSTOMER BY PHONE
+// =====================================
+
+exports.searchCustomerByPhone = async (req, res) => {
+    try {
+        const businessId = req.businessId;
+        const phone = String(req.params.phone || "").trim();
+
+        if (!/^\d{10}$/.test(phone)) {
+            return res.status(400).json({
+                success: false,
+                message: "Enter a valid 10-digit phone number"
+            });
+        }
+
+        const [customers] = await db.query(
+            `SELECT
+                id,
+                customer_name,
+                customer_phone,
+                customer_email,
+                address,
+                total_orders,
+                total_spent,
+                last_purchase,
+                status
+             FROM customers
+             WHERE business_id = ?
+               AND customer_phone = ?
+             LIMIT 1`,
+            [businessId, phone]
+        );
+
+        if (customers.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: "Customer not found"
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: customers[0]
+        });
+
+    } catch (err) {
+        console.error("Search Customer Error:", err);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to search customer"
+        });
+    }
+};
