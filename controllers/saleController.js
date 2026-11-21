@@ -426,6 +426,9 @@ exports.createSale = async (req, res) => {
 // =====================================
 // GET SALES - SECURED
 // =====================================
+// =====================================
+// GET SALES - SECURED + DATE FILTER + SEARCH
+// =====================================
 
 exports.getSales = async (req, res) => {
     try {
@@ -438,36 +441,129 @@ exports.getSales = async (req, res) => {
             });
         }
 
-        // Pagination prevents loading every sale and its items into memory at once.
-        const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
-        const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
+        // Pagination
+        const page = Math.max(
+            1,
+            Number.parseInt(req.query.page, 10) || 1
+        );
+
+        const limit = Math.min(
+            100,
+            Math.max(
+                1,
+                Number.parseInt(req.query.limit, 10) || 20
+            )
+        );
+
         const offset = (page - 1) * limit;
 
+        // Filters
+        const {
+            startDate,
+            endDate,
+            paymentStatus,
+            paymentMethod,
+            search
+        } = req.query;
+
+        let whereConditions = ["business_id = ?"];
+        let filterParams = [businessId];
+
+        // Date filter
+        if (startDate && endDate) {
+            whereConditions.push(
+                "DATE(created_at) BETWEEN ? AND ?"
+            );
+
+            filterParams.push(startDate, endDate);
+        } else if (startDate) {
+            whereConditions.push("DATE(created_at) >= ?");
+            filterParams.push(startDate);
+        } else if (endDate) {
+            whereConditions.push("DATE(created_at) <= ?");
+            filterParams.push(endDate);
+        }
+
+        // Payment status filter
+        if (paymentStatus && paymentStatus !== "All") {
+            whereConditions.push("payment_status = ?");
+            filterParams.push(paymentStatus);
+        }
+
+        // Payment method filter
+        if (paymentMethod && paymentMethod !== "All") {
+            whereConditions.push("payment_method = ?");
+            filterParams.push(paymentMethod);
+        }
+
+        // Search invoice number or customer
+        if (search && search.trim()) {
+            whereConditions.push(
+                "(invoice_no LIKE ? OR customer_name LIKE ? OR customer_phone LIKE ?)"
+            );
+
+            const searchValue = `%${search.trim()}%`;
+
+            filterParams.push(
+                searchValue,
+                searchValue,
+                searchValue
+            );
+        }
+
+        const whereClause = whereConditions.join(" AND ");
+
+        // Get total count for pagination
         const [[countRow]] = await db.query(
-            "SELECT COUNT(*) AS total FROM sales WHERE business_id = ?",
-            [businessId]
+            `
+            SELECT COUNT(*) AS total
+            FROM sales
+            WHERE ${whereClause}
+            `,
+            filterParams
         );
 
+        // Get sales
         const [sales] = await db.query(
-            `SELECT
-                id, invoice_no, customer_name, customer_phone,
-                subtotal, discount, gst_percent, cgst, sgst,
-                tax, total_amount, payment_method, payment_status,
+            `
+            SELECT
+                id,
+                invoice_no,
+                customer_name,
+                customer_phone,
+                subtotal,
+                discount,
+                gst_percent,
+                cgst,
+                sgst,
+                tax,
+                total_amount,
+                payment_method,
+                payment_status,
                 created_at
-             FROM sales
-             WHERE business_id = ?
-             ORDER BY id DESC
-             LIMIT ? OFFSET ?`,
-            [businessId, limit, offset]
+            FROM sales
+            WHERE ${whereClause}
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?
+            `,
+            [
+                ...filterParams,
+                limit,
+                offset
+            ]
         );
 
-        // One query for all items on this page avoids the N+1 query pattern.
+        // Fetch items for the current page
         if (sales.length > 0) {
             const saleIds = sales.map(sale => sale.id);
-            const placeholders = saleIds.map(() => "?").join(",");
+
+            const placeholders = saleIds
+                .map(() => "?")
+                .join(",");
 
             const [items] = await db.query(
-                `SELECT
+                `
+                SELECT
                     sale_id,
                     product_name,
                     entered_quantity,
@@ -476,37 +572,49 @@ exports.getSales = async (req, res) => {
                     base_unit,
                     price,
                     total
-                 FROM sale_items
-                 WHERE sale_id IN (${placeholders})
-                 ORDER BY id ASC`,
+                FROM sale_items
+                WHERE sale_id IN (${placeholders})
+                ORDER BY id ASC
+                `,
                 saleIds
             );
 
             const itemsBySaleId = new Map();
+
             for (const item of items) {
                 if (!itemsBySaleId.has(item.sale_id)) {
                     itemsBySaleId.set(item.sale_id, []);
                 }
-                itemsBySaleId.get(item.sale_id).push(item);
+
+                itemsBySaleId
+                    .get(item.sale_id)
+                    .push(item);
             }
 
             for (const sale of sales) {
-                sale.items = itemsBySaleId.get(sale.id) || [];
+                sale.items =
+                    itemsBySaleId.get(sale.id) || [];
             }
         } else {
-            for (const sale of sales) sale.items = [];
+            for (const sale of sales) {
+                sale.items = [];
+            }
         }
+
+        const total = Number(countRow.total) || 0;
 
         return res.json({
             success: true,
-            total: Number(countRow.total) || 0,
+            total,
             page,
             limit,
-            totalPages: Math.ceil((Number(countRow.total) || 0) / limit),
+            totalPages: Math.ceil(total / limit),
             data: sales
         });
+
     } catch (err) {
         console.error("Get Sales Error:", err);
+
         return res.status(500).json({
             success: false,
             message: "Failed to fetch sales",
@@ -514,60 +622,6 @@ exports.getSales = async (req, res) => {
         });
     }
 };
-
-// =====================================
-// GET SALE DETAILS - SECURED
-// =====================================
-
-exports.getSale = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const businessId = req.businessId;
-
-        if (!businessId) {
-            return res.status(400).json({
-                success: false,
-                message: "Business not found"
-            });
-        }
-
-        // SECURITY: Verify sale belongs to this business
-        const [sale] = await db.query(
-            "SELECT * FROM sales WHERE id = ? AND business_id = ?",
-            [id, businessId]
-        );
-
-        if (sale.length === 0) {
-            return res.status(404).json({
-                success: false,
-                message: "Sale Not Found"
-            });
-        }
-
-        const [items] = await db.query(
-            `SELECT
-                product_name, quantity, entered_quantity, entered_unit,
-                base_quantity, base_price, base_unit,
-                price, tax, tax_rate, total
-            FROM sale_items
-            WHERE sale_id = ?`,
-            [id]
-        );
-
-        res.json({
-            success: true,
-            sale: sale[0],
-            items
-        });
-
-    } catch (err) {
-        res.status(500).json({
-            success: false,
-            message: err.message
-        });
-    }
-};
-
 // =====================================
 // UPDATE PAYMENT STATUS - SECURED
 // =====================================
