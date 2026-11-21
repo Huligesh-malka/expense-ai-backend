@@ -426,6 +426,9 @@ exports.createSale = async (req, res) => {
 // =====================================
 // GET SALES - SECURED
 // =====================================
+// =====================================
+// GET SALES - DATE FILTER + PAGINATION
+// =====================================
 
 exports.getSales = async (req, res) => {
     try {
@@ -438,30 +441,73 @@ exports.getSales = async (req, res) => {
             });
         }
 
-        // Pagination prevents loading every sale and its items into memory at once.
-        const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
-        const limit = Math.min(100, Math.max(1, Number.parseInt(req.query.limit, 10) || 20));
+        const page = Math.max(
+            1,
+            Number.parseInt(req.query.page, 10) || 1
+        );
+
+        const limit = Math.min(
+            100,
+            Math.max(
+                1,
+                Number.parseInt(req.query.limit, 10) || 20
+            )
+        );
+
         const offset = (page - 1) * limit;
 
+        const { startDate, endDate } = req.query;
+
+        let whereQuery = "WHERE business_id = ?";
+        const queryParams = [businessId];
+
+        // DATE FILTER
+        if (startDate && endDate) {
+            whereQuery += " AND DATE(created_at) BETWEEN ? AND ?";
+            queryParams.push(startDate, endDate);
+        } else if (startDate) {
+            whereQuery += " AND DATE(created_at) >= ?";
+            queryParams.push(startDate);
+        } else if (endDate) {
+            whereQuery += " AND DATE(created_at) <= ?";
+            queryParams.push(endDate);
+        }
+
+        // TOTAL RECORDS
         const [[countRow]] = await db.query(
-            "SELECT COUNT(*) AS total FROM sales WHERE business_id = ?",
-            [businessId]
+            `SELECT COUNT(*) AS total
+             FROM sales
+             ${whereQuery}`,
+            queryParams
         );
 
+        const total = Number(countRow.total) || 0;
+
+        // GET SALES WITH PAGINATION
         const [sales] = await db.query(
             `SELECT
-                id, invoice_no, customer_name, customer_phone,
-                subtotal, discount, gst_percent, cgst, sgst,
-                tax, total_amount, payment_method, payment_status,
+                id,
+                invoice_no,
+                customer_name,
+                customer_phone,
+                subtotal,
+                discount,
+                gst_percent,
+                cgst,
+                sgst,
+                tax,
+                total_amount,
+                payment_method,
+                payment_status,
                 created_at
              FROM sales
-             WHERE business_id = ?
-             ORDER BY id DESC
+             ${whereQuery}
+             ORDER BY created_at DESC, id DESC
              LIMIT ? OFFSET ?`,
-            [businessId, limit, offset]
+            [...queryParams, limit, offset]
         );
 
-        // One query for all items on this page avoids the N+1 query pattern.
+        // GET ITEMS FOR SALES
         if (sales.length > 0) {
             const saleIds = sales.map(sale => sale.id);
             const placeholders = saleIds.map(() => "?").join(",");
@@ -475,6 +521,7 @@ exports.getSales = async (req, res) => {
                     base_quantity,
                     base_unit,
                     price,
+                    tax,
                     total
                  FROM sale_items
                  WHERE sale_id IN (${placeholders})
@@ -483,10 +530,12 @@ exports.getSales = async (req, res) => {
             );
 
             const itemsBySaleId = new Map();
+
             for (const item of items) {
                 if (!itemsBySaleId.has(item.sale_id)) {
                     itemsBySaleId.set(item.sale_id, []);
                 }
+
                 itemsBySaleId.get(item.sale_id).push(item);
             }
 
@@ -494,19 +543,23 @@ exports.getSales = async (req, res) => {
                 sale.items = itemsBySaleId.get(sale.id) || [];
             }
         } else {
-            for (const sale of sales) sale.items = [];
+            for (const sale of sales) {
+                sale.items = [];
+            }
         }
 
         return res.json({
             success: true,
-            total: Number(countRow.total) || 0,
+            total,
             page,
             limit,
-            totalPages: Math.ceil((Number(countRow.total) || 0) / limit),
+            totalPages: Math.ceil(total / limit),
             data: sales
         });
+
     } catch (err) {
         console.error("Get Sales Error:", err);
+
         return res.status(500).json({
             success: false,
             message: "Failed to fetch sales",
