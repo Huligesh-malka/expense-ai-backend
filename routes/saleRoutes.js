@@ -18,12 +18,24 @@ router.post(
 
 // =====================================
 // GET ALL SALES
+// Supports pagination, search and date filters
 // =====================================
 router.get(
     "/",
     authMiddleware,
     businessMiddleware,
     saleController.getSales
+);
+
+// =====================================
+// EXPORT SALES / INVOICES
+// IMPORTANT: Must be before /:id
+// =====================================
+router.get(
+    "/export",
+    authMiddleware,
+    businessMiddleware,
+    saleController.exportSales
 );
 
 // =====================================
