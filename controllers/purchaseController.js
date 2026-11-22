@@ -369,75 +369,62 @@ exports.createPurchase = async (req, res) => {
 // GET ALL PURCHASES
 // =====================================
 exports.getPurchases = async (req, res) => {
-
     try {
-
         const businessId = req.businessId;
 
         if (!businessId) {
-
             return res.status(400).json({
                 success: false,
                 message: "Business ID is required"
             });
-
         }
 
         const [rows] = await db.query(
-
             `SELECT
                 p.id,
+                p.supplier_id,
                 p.invoice_no,
+
                 s.supplier_name,
+
                 p.subtotal,
                 p.discount,
                 p.tax,
                 p.total_amount,
+
                 p.payment_method,
                 p.payment_status,
                 p.paid_amount,
                 p.due_amount,
+
                 p.created_at
 
             FROM purchases p
 
             LEFT JOIN suppliers s
-            ON p.supplier_id = s.id
+                ON p.supplier_id = s.id
 
             WHERE p.business_id = ?
 
             ORDER BY p.id DESC`,
-
             [businessId]
-
         );
 
-        res.json({
-
+        return res.json({
             success: true,
-
             total: rows.length,
-
             data: rows
-
         });
 
     } catch (err) {
-
         console.error("Get Purchases Error:", err);
 
-        res.status(500).json({
-
+        return res.status(500).json({
             success: false,
-
             message: err.message
-
         });
-
     }
-
 };
-
 // =====================================
 // GET SINGLE PURCHASE
 // =====================================
